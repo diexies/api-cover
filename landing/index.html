@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="APICover — visual state-space tester for HTTP APIs. See every branch your backend can take, before production does." />
+  <title>APICover — Cover every branch. Every variant.</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="apple-touch-icon" href="./favicon.svg" />
+  <meta name="theme-color" content="#fdfcfc" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-word">APICover</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#problem">Problem</a></li>
+      <li><a href="#product">Product</a></li>
+      <li><a href="#difference">Different</a></li>
+      <li><a href="#how">How it works</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a class="pill filled" href="#waitlist">Request access</a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">For ASP.NET Core APIs · Pre-public · 0.1.0-alpha</p>
+      <h1 class="display">
+        Cover every branch.<br />
+        Every variant.<br />
+        <span class="muted-display">Before production does.</span>
+      </h1>
+      <p class="lede lede-sm">
+        APICover is a visual state-space tester for HTTP APIs. Attach it to your
+        ASP.NET Core app, watch it discover every endpoint, and compose
+        scenarios as a DAG on a canvas. Drop a Case Set on any node and the
+        engine forks the run into a tree of branches — one trace per behavior
+        your API can exhibit.
+      </p>
+
+      <p class="note">
+        Closed alpha. We hand-pick the first cohort of vibe-coded backend teams.
+      </p>
+    </div>
+
+    <!-- Capabilities card — what APICover does, at a glance -->
+    <aside class="caps-card" aria-label="What APICover does">
+      <header class="caps-head">
+        <span class="caps-title">What it does</span>
+        <span class="caps-meta mono">v0.1.0-alpha · ASP.NET Core</span>
+      </header>
+
+      <ul class="caps-list" role="list">
+        <li class="cap-row k1">
+          <span class="cap-mark cap-fork" aria-hidden="true">⑂</span>
+          <div class="cap-text">
+            <h3 class="cap-name">Case-based branching</h3>
+            <p class="cap-body">Fork the run at any node. N variants, multiplicative — one trace per behavior your API can exhibit.</p>
+          </div>
+        </li>
+
+        <li class="cap-row k2">
+          <span class="cap-mark cap-flow" aria-hidden="true">◆</span>
+          <div class="cap-text">
+            <h3 class="cap-name">Visual DAG composition</h3>
+            <p class="cap-body">Wire endpoints on a canvas. Path, query, body accept inline JSONLogic against upstream responses. No glue code.</p>
+          </div>
+        </li>
+
+        <li class="cap-row k3">
+          <span class="cap-mark cap-cg" aria-hidden="true">⊟</span>
+          <div class="cap-text">
+            <h3 class="cap-name">IL-level call-graph</h3>
+            <p class="cap-body">Walks compiled IL. Surfaces interface→impl, external HTTP, database boundaries — the box from the outside in.</p>
+          </div>
+        </li>
+
+        <li class="cap-row k4">
+          <span class="cap-mark cap-multi" aria-hidden="true">⊞</span>
+          <div class="cap-text">
+            <h3 class="cap-name">Multi-scenario runs</h3>
+            <p class="cap-body">Link scenarios that share endpoints. Run them together. One coverage matrix, no Postman duplication.</p>
+          </div>
+        </li>
+
+        <li class="cap-row k5">
+          <span class="cap-mark cap-attach" aria-hidden="true">↻</span>
+          <div class="cap-text">
+            <h3 class="cap-name">In-process middleware</h3>
+            <p class="cap-body"><code class="mono">AddAPICover()</code> + attach. No proxy, no SDK, no agent. Discovers routes from the live route table.</p>
+          </div>
+        </li>
+      </ul>
+
+      <footer class="caps-foot">
+        <span class="caps-foot-dot"></span>
+        Auto-discovery · Branched executor · Real-system testing
+      </footer>
+    </aside>
+  </section>
+
+  <!-- LOGOS / SOCIAL PROOF FILLER -->
+  <section class="proof">
+    <div class="proof-inner">
+      <p class="proof-label">Built for backends that ship faster than they can be read</p>
+      <ul class="proof-stack">
+        <li>ASP.NET Core</li>
+        <li>Minimal APIs</li>
+        <li>Controllers</li>
+        <li>EF Core</li>
+        <li>HttpClient</li>
+        <li>SQL Server · Postgres · SQLite</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section id="problem" class="block">
+    <div class="block-inner">
+      <p class="eyebrow">The problem</p>
+      <h2 class="heading-lg">
+        Swagger shows endpoints. <br />
+        It doesn't show <em>behavior</em>.
+      </h2>
+
+      <div class="two-col">
+        <p class="prose">
+          Vibe-coded backends ship faster than any human can read them. The AI
+          wrote a checkout flow, a payment retry path, a slug-uniqueness guard,
+          a soft-delete cascade — and nobody on the team can recite, line by
+          line, what the system actually does.
+        </p>
+        <p class="prose">
+          You see endpoints in Swagger. You see fields in OpenAPI. You don't
+          see <em>flows</em>. You don't see what happens when login succeeds
+          but the cart is empty. You don't see how the system reacts to twelve
+          near-identical inputs that land on six different code paths. So
+          coverage becomes a stack of near-duplicate Postman collections
+          someone assembles by hand and forgets to update.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUCT -->
+  <section id="product" class="block ground">
+    <div class="block-inner">
+      <p class="eyebrow">What it does</p>
+      <h2 class="heading-lg">Three primitives. One coverage matrix.</h2>
+
+      <div class="showcase" aria-label="APICover product walkthrough">
+        <div class="showcase-tabs" role="tablist" aria-label="Showcase stages">
+          <span class="showcase-indicator" aria-hidden="true"></span>
+          <button class="showcase-tab is-active" role="tab" id="tab-discover" aria-controls="scene-discover" aria-selected="true" data-stage="discover">
+            <span class="tab-dot dot-ember"></span>
+            <span class="tab-label">Discover</span>
+            <span class="tab-sub">routes → DAG</span>
+          </button>
+          <button class="showcase-tab" role="tab" id="tab-compose" aria-controls="scene-compose" aria-selected="false" tabindex="-1" data-stage="compose">
+            <span class="tab-dot dot-blue"></span>
+            <span class="tab-label">Compose</span>
+            <span class="tab-sub">sidebar · inspector</span>
+          </button>
+          <button class="showcase-tab" role="tab" id="tab-branch" aria-controls="scene-branch" aria-selected="false" tabindex="-1" data-stage="branch">
+            <span class="tab-dot dot-black"></span>
+            <span class="tab-label">Branch</span>
+            <span class="tab-sub">code → services</span>
+          </button>
+          <button class="showcase-tab" role="tab" id="tab-scenarios" aria-controls="scene-scenarios" aria-selected="false" tabindex="-1" data-stage="scenarios">
+            <span class="tab-dot dot-ember"></span>
+            <span class="tab-label">Scenarios</span>
+            <span class="tab-sub">link · run together</span>
+          </button>
+        </div>
+
+        <div class="showcase-stage">
+
+          <!-- Stage 1: Discover (DAG assembly + cursor + menu + group area) -->
+          <section class="scene scene-discover is-active is-playing" id="scene-discover" role="tabpanel" aria-labelledby="tab-discover">
+            <header class="scene-head">
+              <span class="scene-eye">canvas</span>
+              <span class="scene-meta">discovering routes from the live host…</span>
+            </header>
+            <div class="discover-canvas">
+              <svg class="discover-svg" viewBox="0 0 920 360" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                <defs>
+                  <marker id="sc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+                  </marker>
+                </defs>
+                <path class="d-edge e1" d="M155 90  C 220 90,  240 60,  295 60"  marker-end="url(#sc-arrow)" />
+                <path class="d-edge e2" d="M155 90  C 220 90,  240 150, 295 150" marker-end="url(#sc-arrow)" />
+                <path class="d-edge e3" d="M155 90  C 220 90,  240 240, 295 240" marker-end="url(#sc-arrow)" />
+                <path class="d-edge e4" d="M455 60  C 510 60,  520 150, 575 150" marker-end="url(#sc-arrow)" />
+                <path class="d-edge e5" d="M455 150 C 510 150, 520 150, 575 150" marker-end="url(#sc-arrow)" />
+                <path class="d-edge e6" d="M455 240 C 510 240, 520 150, 575 150" marker-end="url(#sc-arrow)" />
+                <path class="d-edge e7" d="M725 150 C 770 150, 770 150, 815 150" marker-end="url(#sc-arrow)" />
+              </svg>
+
+              <!-- Group area (sub-stage 3) — encloses cart variants + checkout -->
+              <div class="d-group">
+                <span class="d-group-label">
+                  <span class="d-group-dot"></span>
+                  cart-flow
+                  <span class="d-group-count">4 nodes</span>
+                </span>
+              </div>
+
+              <div class="d-node n1" style="left:30px; top:74px;">
+                <span class="n-kind">POST</span><span class="n-path">/auth/login</span>
+                <span class="n-anchor">⑂3</span>
+              </div>
+              <div class="d-node n2" style="left:295px; top:44px;"><span class="n-kind">GET</span><span class="n-path">/cart/{id}</span><span class="n-tag">v1</span></div>
+              <div class="d-node n3" style="left:295px; top:134px;"><span class="n-kind">GET</span><span class="n-path">/cart/{id}</span><span class="n-tag">v2</span></div>
+              <div class="d-node n4" style="left:295px; top:224px;"><span class="n-kind">GET</span><span class="n-path">/cart/{id}</span><span class="n-tag">v3</span></div>
+              <div class="d-node n5" style="left:575px; top:134px;">
+                <span class="n-kind">POST</span><span class="n-path">/checkout</span>
+                <span class="n-bp" aria-hidden="true">●</span>
+              </div>
+              <div class="d-node n6" style="left:815px; top:134px;"><span class="n-kind">POST</span><span class="n-path">/invoices</span></div>
+
+              <!-- Cursor (sub-stage 2) -->
+              <span class="d-cursor" aria-hidden="true">
+                <svg viewBox="0 0 14 18" width="14" height="18">
+                  <path d="M1 1 L1 14 L4.5 11 L7 16 L9 15 L6.5 10 L11 10 Z" fill="#000" stroke="#fff" stroke-width="0.6"/>
+                </svg>
+              </span>
+
+              <!-- Context menu (sub-stage 2) -->
+              <div class="d-menu" aria-hidden="true">
+                <div class="d-menu-head">POST /checkout</div>
+                <ul class="d-menu-list">
+                  <li class="d-menu-item">⚡ Quick Call</li>
+                  <li class="d-menu-item">✏ Edit (open inspector)</li>
+                  <li class="d-menu-item is-hover">○ Add breakpoint</li>
+                  <li class="d-menu-item">◉ Set as start node</li>
+                  <li class="d-menu-item">⑂ Add case set</li>
+                  <li class="d-menu-sep"></li>
+                  <li class="d-menu-item">⊞ Create group from selection</li>
+                  <li class="d-menu-item danger">🗑 Delete node</li>
+                </ul>
+              </div>
+            </div>
+            <footer class="scene-caption">
+              <span class="cap-counter"><span class="d-counter">0</span>&nbsp;/&nbsp;6 endpoints</span>
+              <span class="cap-sep">·</span>
+              <span class="d-substage">discovering routes</span>
+            </footer>
+          </section>
+
+          <!-- Stage 2: Compose (sidebar + inspector) -->
+          <section class="scene scene-compose" id="scene-compose" role="tabpanel" aria-labelledby="tab-compose" hidden>
+            <div class="compose-grid">
+              <aside class="cmp-sidebar">
+                <div class="cmp-side-head">ENDPOINTS</div>
+                <ul class="cmp-list">
+                  <li class="cmp-group r1">
+                    <span class="cmp-group-head">
+                      <span class="cmp-caret">▾</span>
+                      <span class="cmp-method m-get">GET</span>
+                      <span class="cmp-group-count">3</span>
+                    </span>
+                    <ul class="cmp-sub">
+                      <li>/cart/{id}</li>
+                      <li>/invoices</li>
+                      <li>/users/me</li>
+                    </ul>
+                  </li>
+                  <li class="cmp-group r2">
+                    <span class="cmp-group-head">
+                      <span class="cmp-caret">▾</span>
+                      <span class="cmp-method m-post">POST</span>
+                      <span class="cmp-group-count">4</span>
+                    </span>
+                    <ul class="cmp-sub">
+                      <li>/auth/login</li>
+                      <li class="is-selected">/checkout</li>
+                      <li>/invoices</li>
+                      <li>/webhooks</li>
+                    </ul>
+                  </li>
+                  <li class="cmp-group r3">
+                    <span class="cmp-group-head">
+                      <span class="cmp-caret">▸</span>
+                      <span class="cmp-method m-del">DEL</span>
+                      <span class="cmp-group-count">1</span>
+                    </span>
+                  </li>
+                </ul>
+              </aside>
+
+              <div class="cmp-canvas">
+                <span class="cmp-canvas-eye">canvas</span>
+                <span class="cmp-playground">playground</span>
+              </div>
+
+              <div class="cmp-inspector">
+                <div class="cmp-tabs">
+                  <span class="cmp-tab cmp-tab-1">overview</span>
+                  <span class="cmp-tab cmp-tab-2">request</span>
+                  <span class="cmp-tab cmp-tab-3">wiring</span>
+                  <span class="cmp-tab cmp-tab-4">branching</span>
+                  <span class="cmp-tab cmp-tab-5">history</span>
+                </div>
+                <div class="cmp-panels">
+
+                  <!-- 1. Overview -->
+                  <div class="cmp-panel cmp-panel-1">
+                    <div class="cmp-ov-head">
+                      <span class="cmp-ov-id mono">checkout</span>
+                      <h4 class="cmp-ov-name">Checkout flow</h4>
+                    </div>
+                    <p class="cmp-ov-sum">
+                      Login, build cart, submit payment, write invoice.
+                      Branched on payment-method (3 variants).
+                    </p>
+                    <div class="cmp-ov-tags">
+                      <span class="cmp-tag">billing</span>
+                      <span class="cmp-tag">happy-path</span>
+                      <span class="cmp-tag">v2</span>
+                    </div>
+                    <div class="cmp-ov-stats">
+                      <div class="ov-stat"><span class="ov-stat-num mono">6</span><span class="ov-stat-lbl">nodes</span></div>
+                      <div class="ov-stat"><span class="ov-stat-num mono">7</span><span class="ov-stat-lbl">edges</span></div>
+                      <div class="ov-stat"><span class="ov-stat-num mono">3</span><span class="ov-stat-lbl">cases</span></div>
+                      <div class="ov-stat"><span class="ov-stat-num mono">42</span><span class="ov-stat-lbl">runs</span></div>
+                    </div>
+                  </div>
+
+                  <!-- 2. Request -->
+                  <div class="cmp-panel cmp-panel-2">
+                    <div class="cmp-field f1">
+                      <span class="f-lbl">path</span>
+                      <span class="f-val mono">/checkout</span>
+                    </div>
+                    <div class="cmp-field f2">
+                      <span class="f-lbl">query</span>
+                      <span class="f-val mono">?cartId=<span class="logic">{{ nodes.cart.response.id }}</span></span>
+                    </div>
+                    <div class="cmp-field f3">
+                      <span class="f-lbl">body</span>
+                      <pre class="f-body mono"><span class="brace">{</span>
+  <span class="key">"userId"</span>: <span class="logic typing"><span class="t">{{ nodes.login.response.userId }}</span><span class="cursor"></span></span>,
+  <span class="key">"amount"</span>: <span class="num">2400</span>
+<span class="brace">}</span></pre>
+                      <span class="cmp-chip">JSONLogic · live binding</span>
+                    </div>
+                  </div>
+
+                  <!-- 3. Wiring -->
+                  <div class="cmp-panel cmp-panel-3">
+                    <div class="cmp-row-kv"><span class="kv-k">depends on</span>
+                      <span class="kv-v mono">login &nbsp;→&nbsp; cart &nbsp;→&nbsp; <strong>checkout</strong></span>
+                    </div>
+                    <div class="cmp-wiring-head">runtime context preview</div>
+                    <pre class="cmp-wiring mono"><span class="key">nodes.login.response.userId</span>   <span class="op">=</span> <span class="str">"u_42"</span>
+<span class="key">nodes.login.response.token</span>    <span class="op">=</span> <span class="str">"eyJh..."</span>
+<span class="key">nodes.cart.response.id</span>        <span class="op">=</span> <span class="str">"c_99"</span>
+<span class="key">nodes.cart.response.total</span>     <span class="op">=</span> <span class="num">2400</span>
+<span class="key">nodes.cart.response.items</span>     <span class="op">=</span> <span class="str">[3]</span></pre>
+                  </div>
+
+                  <!-- 4. Branching -->
+                  <div class="cmp-panel cmp-panel-4">
+                    <div class="cmp-bra-head">
+                      <span class="kv-k">case set</span>
+                      <span class="kv-v">payment-method</span>
+                      <span class="cmp-fork">⑂3</span>
+                    </div>
+                    <ul class="cmp-bra-list">
+                      <li class="bra-row">
+                        <span class="bra-tag mono">v1</span>
+                        <span class="bra-label">valid-card</span>
+                        <span class="bra-over mono">Authorization: Bearer …</span>
+                      </li>
+                      <li class="bra-row">
+                        <span class="bra-tag mono">v2</span>
+                        <span class="bra-label">declined</span>
+                        <span class="bra-over mono">cardNumber: 4000 0000 0000 0002</span>
+                      </li>
+                      <li class="bra-row">
+                        <span class="bra-tag mono">v3</span>
+                        <span class="bra-label">expired</span>
+                        <span class="bra-over mono">cardExpiry: 01/2020</span>
+                      </li>
+                    </ul>
+                    <p class="cmp-bra-foot">3 variants × downstream subtree = 3 branches</p>
+                  </div>
+
+                  <!-- 5. History -->
+                  <div class="cmp-panel cmp-panel-5">
+                    <div class="cmp-hist-head">last runs</div>
+                    <ul class="cmp-hist-list">
+                      <li class="hist-row ok"><span class="hist-time">2m ago</span><span class="hist-pill ok">✓</span><span class="hist-status mono">201 Created</span><span class="hist-path mono">v1/v1</span></li>
+                      <li class="hist-row ok"><span class="hist-time">4m ago</span><span class="hist-pill ok">✓</span><span class="hist-status mono">201 Created</span><span class="hist-path mono">v1/v2</span></li>
+                      <li class="hist-row warn"><span class="hist-time">6m ago</span><span class="hist-pill warn">!</span><span class="hist-status mono">402 Payment Req.</span><span class="hist-path mono">v2/v1</span></li>
+                      <li class="hist-row ok"><span class="hist-time">18m ago</span><span class="hist-pill ok">✓</span><span class="hist-status mono">201 Created</span><span class="hist-path mono">v1/v1</span></li>
+                    </ul>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+            <footer class="scene-caption">
+              <span>request body bound to upstream response · resolves at run time</span>
+            </footer>
+          </section>
+
+          <!-- Stage 3: Branch (code → call graph) -->
+          <section class="scene scene-branch" id="scene-branch" role="tabpanel" aria-labelledby="tab-branch" hidden>
+            <div class="branch-grid">
+              <div class="br-code">
+                <header class="br-head">
+                  <span class="br-eye">BillingController.cs</span>
+                  <span class="br-meta">ASP.NET Core · controller method</span>
+                </header>
+                <pre class="br-pre"><code><span class="br-line l1"><span class="kw">public async</span> <span class="ty">Task</span>&lt;<span class="ty">Invoice</span>&gt; CreateInvoice(<span class="ty">InvoiceRequest</span> r) {</span>
+<span class="br-line l2">  <span class="kw">var</span> charge = <span class="kw">await</span> _payments.<span class="fn">ChargeAsync</span>(r);</span>
+<span class="br-line l3">  <span class="kw">var</span> inv = <span class="kw">await</span> _repo.<span class="fn">AddAsync</span>(charge);</span>
+<span class="br-line l4">  <span class="kw">await</span> _db.<span class="fn">SaveChangesAsync</span>();</span>
+<span class="br-line l5">  <span class="kw">return</span> inv;</span>
+<span class="br-line l6">}</span></code></pre>
+              </div>
+
+              <div class="br-graph">
+                <header class="br-head">
+                  <span class="br-eye">internals</span>
+                  <span class="br-meta">IL walk · POST /invoices · 6 calls</span>
+                </header>
+                <ol class="br-rows">
+                  <li class="br-row depth-0 g1"><span class="br-step">1</span><span class="br-badge k-ctrl">controller</span><span class="br-name"><strong>BillingController</strong>.CreateInvoice</span></li>
+                  <li class="br-row depth-1 g2"><span class="br-step">2</span><span class="br-badge k-iface">interface</span><span class="br-name"><strong>IInvoiceService</strong>.CreateAsync</span><span class="br-impl">→ InvoiceService</span></li>
+                  <li class="br-row depth-2 g3"><span class="br-step">3</span><span class="br-badge k-iface">interface</span><span class="br-name"><strong>IPaymentGateway</strong>.ChargeAsync</span><span class="br-impl">→ PaymentGateway</span></li>
+                  <li class="br-row depth-3 g4"><span class="br-step">4</span><span class="br-badge k-ext">→ external HTTP</span><span class="br-name">HttpClient.PostAsJsonAsync</span></li>
+                  <li class="br-row depth-2 g5"><span class="br-step">5</span><span class="br-badge k-iface">interface</span><span class="br-name"><strong>IInvoiceRepository</strong>.AddAsync</span><span class="br-impl">→ InvoiceRepository</span></li>
+                  <li class="br-row depth-3 g6"><span class="br-step">6</span><span class="br-badge k-db">db</span><span class="br-name">AppDbContext.SaveChangesAsync</span></li>
+                </ol>
+              </div>
+            </div>
+            <footer class="scene-caption">
+              <span>→ external HTTP · payments.example.com</span>
+              <span class="cap-sep">·</span>
+              <span>→ database · AppDbContext</span>
+              <span class="cap-sep">·</span>
+              <span>resolved through DI</span>
+            </footer>
+          </section>
+
+          <!-- Stage 4: Scenarios (multi-scenario · link · run together) -->
+          <section class="scene scene-scenarios" id="scene-scenarios" role="tabpanel" aria-labelledby="tab-scenarios" hidden>
+            <header class="scene-head">
+              <span class="scene-eye">scenarios</span>
+              <span class="scene-meta">multiple flows · linked · run together</span>
+            </header>
+
+            <div class="sc-stack">
+              <!-- SVG overlay for cross-scenario links (drawn between row right edges
+                   on the right gutter of the stack). preserveAspectRatio=none lets
+                   the curves stretch to whatever the rendered height becomes. -->
+              <svg class="sc-xlinks" viewBox="0 0 100 300" preserveAspectRatio="none" aria-hidden="true">
+                <path class="sc-xlink x1" d="M 86 38  C 96 38,  96 110, 86 110"/>
+                <path class="sc-xlink x2" d="M 86 110 C 96 110, 96 182, 86 182"/>
+                <path class="sc-xlink x3" d="M 86 182 C 96 182, 96 254, 86 254"/>
+              </svg>
+
+              <article class="sc-row s1">
+                <header class="sc-row-head">
+                  <span class="sc-id mono">onboarding</span>
+                  <span class="sc-row-name">User onboarding</span>
+                  <span class="sc-tag">auth</span>
+                  <span class="sc-pill ok">✓</span>
+                </header>
+                <ol class="sc-chain">
+                  <li class="sc-n c1"><span class="sc-k">POST</span><span class="sc-p">/signup</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c2"><span class="sc-k">POST</span><span class="sc-p">/verify</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c3 shared"><span class="sc-k">GET</span><span class="sc-p">/me</span><span class="sc-shared-tag">shared</span></li>
+                </ol>
+              </article>
+
+              <article class="sc-row s2">
+                <header class="sc-row-head">
+                  <span class="sc-id mono">checkout-happy</span>
+                  <span class="sc-row-name">Checkout · happy path</span>
+                  <span class="sc-tag">billing</span>
+                  <span class="sc-pill ok">✓</span>
+                </header>
+                <ol class="sc-chain">
+                  <li class="sc-n c1 shared"><span class="sc-k">GET</span><span class="sc-p">/me</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c2"><span class="sc-k">GET</span><span class="sc-p">/cart/{id}</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c3"><span class="sc-k">POST</span><span class="sc-p">/checkout</span><span class="sc-fork">⑂3</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c4 shared"><span class="sc-k">POST</span><span class="sc-p">/invoices</span></li>
+                </ol>
+              </article>
+
+              <article class="sc-row s3">
+                <header class="sc-row-head">
+                  <span class="sc-id mono">checkout-decline</span>
+                  <span class="sc-row-name">Checkout · payment declined</span>
+                  <span class="sc-tag">billing</span>
+                  <span class="sc-pill warn">!</span>
+                </header>
+                <ol class="sc-chain">
+                  <li class="sc-n c1"><span class="sc-k">GET</span><span class="sc-p">/cart/{id}</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c2 shared"><span class="sc-k">POST</span><span class="sc-p">/checkout</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c3"><span class="sc-k">POST</span><span class="sc-p">/refund</span></li>
+                </ol>
+              </article>
+
+              <article class="sc-row s4">
+                <header class="sc-row-head">
+                  <span class="sc-id mono">refund-flow</span>
+                  <span class="sc-row-name">Refund · webhook retry</span>
+                  <span class="sc-tag">billing</span>
+                  <span class="sc-pill ok">✓</span>
+                </header>
+                <ol class="sc-chain">
+                  <li class="sc-n c1 shared"><span class="sc-k">POST</span><span class="sc-p">/refund</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c2"><span class="sc-k">POST</span><span class="sc-p">/webhooks/retry</span></li>
+                  <li class="sc-arr">→</li>
+                  <li class="sc-n c3"><span class="sc-k">POST</span><span class="sc-p">/notify</span></li>
+                </ol>
+              </article>
+            </div>
+
+            <div class="sc-runbar">
+              <button class="sc-run-btn" type="button" aria-hidden="true">
+                <span class="dot ember"></span>
+                Run all 4 scenarios
+                <span class="sc-arrow">→</span>
+              </button>
+              <div class="sc-progress" aria-hidden="true">
+                <div class="sc-progress-fill"></div>
+              </div>
+              <span class="sc-result mono">12 branches · 11 ✓ · 1 expected fail · 1.4s</span>
+            </div>
+
+            <footer class="scene-caption">
+              <span>scenarios share endpoints — link them, run them together, get one coverage matrix</span>
+            </footer>
+          </section>
+
+        </div>
+
+        <div class="showcase-foot">
+          <p class="showcase-meta" aria-live="polite"><span class="showcase-meta-text">discover · 6 endpoints assembled · 1 case-set anchor</span></p>
+          <div class="showcase-progress" aria-hidden="true">
+            <div class="showcase-progress-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIFFERENT -->
+  <section id="difference" class="block">
+    <div class="block-inner">
+      <p class="eyebrow">Different on purpose</p>
+      <h2 class="heading-lg">
+        Existing tools each cover one slice. <br />
+        <span class="muted-display">APICover covers the join.</span>
+      </h2>
+
+      <table class="diff">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Live discovery</th>
+            <th>Visual flow editing</th>
+            <th>Branched state-space</th>
+            <th>Per-branch regression</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Postman / Insomnia</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>Cypress / Playwright</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>k6 / JMeter</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>WireMock / MockServer</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>Hypothesis / property-based</th>
+            <td>—</td><td>—</td><td>partial</td><td>partial</td>
+          </tr>
+          <tr class="us">
+            <th>APICover</th>
+            <td>✓</td><td>✓</td><td>✓</td><td>✓</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="prose center muted">
+        We don't compete on lanes anyone else is in. We sit at the intersection
+        no one else has built.
+      </p>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section id="how" class="block ground">
+    <div class="block-inner">
+      <p class="eyebrow">How it works</p>
+      <h2 class="heading-lg">A snippet, an attach, a canvas.</h2>
+
+      <div class="snippet">
+<pre><code><span class="kw">using</span> APICover.Inspector;
+
+<span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+
+builder.Services.<span class="fn">AddAPICover</span>(opts =&gt;
+{
+    opts.EnableCallGraphInspection = <span class="lit">true</span>;
+});
+
+<span class="kw">var</span> app = builder.Build();
+
+app.<span class="fn">UseAPICover</span>();   <span class="cmt">// /apicover/ui — open it.</span>
+app.<span class="fn">MapControllers</span>();
+
+app.Run();</code></pre>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <span class="step-num">1</span>
+          <p><strong>Attach.</strong> One package. One <code>AddAPICover</code>. The middleware mounts at <code>/apicover/ui</code> and discovers your endpoints from the live route table — same source of truth as the framework itself.</p>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <p><strong>Compose.</strong> Drag endpoints onto the canvas. Wire them. Right-click any node to add a Case Set with N variants — <em>{ valid, invalid-card, expired-token }</em>, whatever shape your behavior takes.</p>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <p><strong>Run.</strong> The engine topologically schedules nodes, forks at every Case Set anchor, deep-clones the run context per branch, and emits a tree. You get one pass/fail per leaf, plus a coverage matrix you didn't have to build.</p>
+        </li>
+        <li>
+          <span class="step-num">4</span>
+          <p><strong>Inspect.</strong> Open the Internals tab on any endpoint. APICover walks the IL of the handler, classifies each call (interface, external HTTP, database), resolves DI to the concrete impl, and renders the call graph with PDB file:line annotations. You see what the box actually does — not what its README claims.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- WAITLIST -->
+  <section id="waitlist" class="block waitlist">
+    <div class="block-inner">
+      <p class="eyebrow">Closed alpha</p>
+      <h2 class="heading-lg">
+        Five seats per week. <br />
+        <span class="muted-display">Tell us what you're shipping.</span>
+      </h2>
+
+      <p class="prose center">
+        We're letting in vibe-coded backend teams first — the people we built
+        this for. Drop your email and a sentence about your stack. We reply
+        within a few days with access and a setup walkthrough.
+      </p>
+
+      <form id="waitlist-main" class="waitlist-card" novalidate>
+        <label>
+          <span class="lbl">Work email</span>
+          <input type="email" name="email" required autocomplete="email" placeholder="you@company.com" />
+        </label>
+        <label>
+          <span class="lbl">What are you building? <span class="lbl-opt">(optional)</span></span>
+          <textarea name="context" rows="3" placeholder="ASP.NET Core API for a B2B billing product. Mostly AI-written. Need to understand what flows actually exist before we ship v1."></textarea>
+        </label>
+        <div class="waitlist-actions">
+          <button type="submit" class="pill filled big">Request access</button>
+          <span class="form-note" id="waitlist-main-note" aria-live="polite"></span>
+        </div>
+      </form>
+
+      <p class="micro">
+        We don't share emails. We don't run drip campaigns. One reply, then
+        either access or a no.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+
+    <!-- Centerpiece: big italic tagline -->
+    <p class="footer-tag">
+      Cover every branch.<br />
+      Every variant. <span class="footer-tag-mute">Before production does.</span>
+    </p>
+
+    <!-- Masthead line -->
+    <div class="footer-masthead">
+      <span>© 2026 APICover</span>
+      <span class="fc-sep">·</span>
+      <span>handcrafted for vibe-coded backends</span>
+      <span class="fc-sep">·</span>
+      <span>made on a slow Tuesday</span>
+    </div>
+
+  </div>
+</footer>
+
+<script src="./app.js" defer></script>
+
+</body>
+</html>

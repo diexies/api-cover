@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>SQLite (EF Core) storage provider for APICover. Default provider.</Description>
+    <PackageId>APICover.Storage.Sqlite</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.26" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\APICover.Abstractions\APICover.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

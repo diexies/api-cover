@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="APICover — visual state-space tester for HTTP APIs. See every branch your backend can take, before production does." />
+  <title>APICover — Cover every branch. Every variant.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top" aria-label="APICover home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-word">APICover</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#problem">Problem</a></li>
+      <li><a href="#product">Product</a></li>
+      <li><a href="#difference">Different</a></li>
+      <li><a href="#how">How it works</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a class="pill ghost" href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+      <a class="pill filled" href="#waitlist">Request access</a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <p class="eyebrow">For ASP.NET Core APIs · Pre-public · 0.1.0-alpha</p>
+        <h1 class="display">
+          Cover every branch.<br />
+          Every variant. <span class="muted-display">Before production does.</span>
+        </h1>
+        <p class="lede">
+          APICover is a visual state-space tester for HTTP APIs. Attach it to your
+          ASP.NET Core app, watch it discover every endpoint, and compose
+          scenarios as a DAG on a canvas. Drop a Case Set on any node and the
+          engine forks the run into a tree of branches — one trace per behavior
+          your API can exhibit.
+        </p>
+
+        <form id="waitlist-hero" class="waitlist-row" novalidate>
+          <input
+            type="email"
+            name="email"
+            required
+            autocomplete="email"
+            placeholder="you@company.com"
+            aria-label="Work email"
+          />
+          <button type="submit" class="pill filled">Request access</button>
+          <p class="form-note" id="waitlist-hero-note" aria-live="polite"></p>
+        </form>
+
+        <p class="note">
+          Closed alpha. We hand-pick the first cohort of vibe-coded backend teams.
+        </p>
+      </div>
+
+      <!-- Demo card -->
+      <aside class="demo-card" aria-label="Product preview">
+        <header class="demo-head">
+          <div class="demo-tabs">
+            <span class="seg active">Canvas</span>
+            <span class="seg">Inspector</span>
+            <span class="seg">Branches</span>
+          </div>
+          <span class="demo-status"><span class="dot ok"></span>3 / 3 passed</span>
+        </header>
+
+        <div class="demo-body">
+          <div class="flow-row root">
+            <span class="flow-step">1</span>
+            <span class="flow-kind">POST</span>
+            <span class="flow-name">/auth/login</span>
+            <span class="flow-fork" title="Case set: 3 variants">⑂3</span>
+          </div>
+
+          <div class="flow-branch">
+            <div class="flow-row">
+              <span class="flow-step">2a</span>
+              <span class="flow-kind">GET</span>
+              <span class="flow-name">/cart/{id}</span>
+              <span class="badge ok">200</span>
+            </div>
+            <div class="flow-row sub">
+              <span class="flow-step">3a</span>
+              <span class="flow-kind">POST</span>
+              <span class="flow-name">/checkout</span>
+              <span class="badge ok">201</span>
+            </div>
+          </div>
+
+          <div class="flow-branch">
+            <div class="flow-row">
+              <span class="flow-step">2b</span>
+              <span class="flow-kind">GET</span>
+              <span class="flow-name">/cart/{id}</span>
+              <span class="badge ok">200</span>
+            </div>
+            <div class="flow-row sub">
+              <span class="flow-step">3b</span>
+              <span class="flow-kind">POST</span>
+              <span class="flow-name">/checkout</span>
+              <span class="badge warn">402</span>
+              <span class="annot">payment failed · expected</span>
+            </div>
+          </div>
+
+          <div class="flow-branch">
+            <div class="flow-row">
+              <span class="flow-step">2c</span>
+              <span class="flow-kind">GET</span>
+              <span class="flow-name">/cart/{id}</span>
+              <span class="badge bad">404</span>
+              <span class="annot">empty cart branch</span>
+            </div>
+          </div>
+        </div>
+
+        <footer class="demo-foot">
+          <code>3 branches · 7 calls · 412ms</code>
+          <span class="demo-foot-sep">·</span>
+          <code>covered: login×3 → checkout×2</code>
+        </footer>
+      </aside>
+    </div>
+  </section>
+
+  <!-- PROOF -->
+  <section class="proof">
+    <div class="proof-inner">
+      <p class="proof-label">Built for backends that ship faster than they can be read</p>
+      <ul class="proof-stack">
+        <li>ASP.NET Core</li>
+        <li>Minimal APIs</li>
+        <li>Controllers</li>
+        <li>EF Core</li>
+        <li>HttpClient</li>
+        <li>SQL Server</li>
+        <li>Postgres</li>
+        <li>SQLite</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section id="problem" class="block">
+    <div class="block-inner">
+      <p class="eyebrow">The problem</p>
+      <h2 class="heading-lg">
+        Swagger shows endpoints.<br />
+        It doesn't show <em>behavior</em>.
+      </h2>
+
+      <div class="two-col">
+        <p class="prose">
+          Vibe-coded backends ship faster than any human can read them. The AI
+          wrote a checkout flow, a payment retry path, a slug-uniqueness guard,
+          a soft-delete cascade — and nobody on the team can recite, line by
+          line, what the system actually does.
+        </p>
+        <p class="prose">
+          You see endpoints in Swagger. You see fields in OpenAPI. You don't
+          see <em>flows</em>. You don't see what happens when login succeeds
+          but the cart is empty. You don't see how the system reacts to twelve
+          near-identical inputs that land on six different code paths. So
+          coverage becomes a stack of near-duplicate Postman collections
+          someone assembles by hand and forgets to update.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUCT -->
+  <section id="product" class="block ground">
+    <div class="block-inner">
+      <p class="eyebrow">What it does</p>
+      <h2 class="heading-lg">Three primitives. One coverage matrix.</h2>
+
+      <div class="features">
+        <article class="feature">
+          <span class="feature-dot" aria-hidden="true"></span>
+          <h3>Discover</h3>
+          <p>
+            Attach the inspector as middleware. APICover walks your registered
+            routes — controllers, minimal APIs, attribute conventions — and
+            indexes every endpoint as a draggable node on the canvas. New
+            routes show up the next time the host starts.
+          </p>
+        </article>
+
+        <article class="feature">
+          <span class="feature-dot dot-blue" aria-hidden="true"></span>
+          <h3>Compose</h3>
+          <p>
+            Wire endpoints into business flows on a DAG canvas. Path, query,
+            headers and body accept inline JSONLogic against a live RunContext
+            — pull <code>nodes.login.response.token</code> straight into the
+            next request. No glue code. No bindings layer. Templates resolve
+            at request time.
+          </p>
+        </article>
+
+        <article class="feature">
+          <span class="feature-dot dot-ink" aria-hidden="true"></span>
+          <h3>Branch</h3>
+          <p>
+            Drop a Case Set on any node. Define N variants — different inputs,
+            different headers, different conditions. The engine forks the run
+            at that anchor, deep-clones the context per variant, and runs the
+            downstream subtree once per branch. Variants compose
+            multiplicatively. Each branch reports its own pass/fail.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- DIFFERENT -->
+  <section id="difference" class="block">
+    <div class="block-inner">
+      <p class="eyebrow">Different on purpose</p>
+      <h2 class="heading-lg">
+        Existing tools each cover one slice.<br />
+        <span class="muted-display">APICover covers the join.</span>
+      </h2>
+
+      <table class="diff" aria-describedby="diff-caption">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Live discovery</th>
+            <th>Visual flow editing</th>
+            <th>Branched state-space</th>
+            <th>Per-branch regression</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Postman / Insomnia</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>Cypress / Playwright</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>k6 / JMeter</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>WireMock / MockServer</th>
+            <td>—</td><td>—</td><td>—</td><td>—</td>
+          </tr>
+          <tr>
+            <th>Hypothesis / property-based</th>
+            <td>—</td><td>—</td><td>partial</td><td>partial</td>
+          </tr>
+          <tr class="us">
+            <th>APICover</th>
+            <td>✓</td><td>✓</td><td>✓</td><td>✓</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p id="diff-caption" class="prose center muted" style="margin-top: 24px;">
+        We don't compete on lanes anyone else is in. We sit at the intersection
+        no one else has built.
+      </p>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section id="how" class="block ground">
+    <div class="block-inner">
+      <p class="eyebrow">How it works</p>
+      <h2 class="heading-lg">A snippet, an attach, a canvas.</h2>
+
+      <div class="snippet">
+<pre><code><span class="kw">using</span> APICover.Inspector;
+
+<span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+
+builder.Services.<span class="fn">AddAPICover</span>(opts =&gt;
+{
+    opts.EnableCallGraphInspection = <span class="lit">true</span>;
+});
+
+<span class="kw">var</span> app = builder.Build();
+
+app.<span class="fn">UseAPICover</span>();   <span class="cmt">// /apicover/ui — open it.</span>
+app.<span class="fn">MapControllers</span>();
+
+app.Run();</code></pre>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <span class="step-num">1</span>
+          <p><strong>Attach.</strong> One package. One <code>AddAPICover</code>. The middleware mounts at <code>/apicover/ui</code> and discovers your endpoints from the live route table — same source of truth as the framework itself.</p>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <p><strong>Compose.</strong> Drag endpoints onto the canvas. Wire them. Right-click any node to add a Case Set with N variants — <em>{ valid, invalid-card, expired-token }</em>, whatever shape your behavior takes.</p>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <p><strong>Run.</strong> The engine topologically schedules nodes, forks at every Case Set anchor, deep-clones the run context per branch, and emits a tree. You get one pass/fail per leaf, plus a coverage matrix you didn't have to build.</p>
+        </li>
+        <li>
+          <span class="step-num">4</span>
+          <p><strong>Inspect.</strong> Open the Internals tab on any endpoint. APICover walks the IL of the handler, classifies each call (interface, external HTTP, database), resolves DI to the concrete impl, and renders the call graph with PDB file:line annotations. You see what the box actually does — not what its README claims.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- WAITLIST -->
+  <section id="waitlist" class="block waitlist">
+    <div class="block-inner">
+      <p class="eyebrow" style="text-align:center;">Closed alpha</p>
+      <h2 class="heading-lg">
+        Five seats per week.<br />
+        <span class="muted-display">Tell us what you're shipping.</span>
+      </h2>
+
+      <p class="prose center">
+        We're letting in vibe-coded backend teams first — the people we built
+        this for. Drop your email and a sentence about your stack. We reply
+        within a few days with access and a setup walkthrough.
+      </p>
+
+      <form id="waitlist-main" class="waitlist-card" novalidate>
+        <label>
+          <span class="lbl">Work email</span>
+          <input type="email" name="email" required autocomplete="email" placeholder="you@company.com" />
+        </label>
+        <label>
+          <span class="lbl">What are you building? <span class="lbl-opt">(optional)</span></span>
+          <textarea name="context" rows="3" placeholder="ASP.NET Core API for a B2B billing product. Mostly AI-written. Need to understand what flows actually exist before we ship v1."></textarea>
+        </label>
+        <div class="waitlist-actions">
+          <button type="submit" class="pill filled big">Request access</button>
+          <span class="form-note" id="waitlist-main-note" aria-live="polite"></span>
+        </div>
+      </form>
+
+      <p class="micro">
+        We don't share emails. We don't run drip campaigns. One reply, then
+        either access or a no.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <span class="brand small">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-word">APICover</span>
+    </span>
+    <span class="footer-tag">Cover every branch. Every variant.</span>
+    <ul class="footer-links">
+      <li><a href="#problem">Problem</a></li>
+      <li><a href="#product">Product</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#waitlist">Request access</a></li>
+    </ul>
+    <span class="footer-meta">© 2026 APICover · apicover.com</span>
+  </div>
+</footer>
+
+<script>
+  // Waitlist form — collect locally, POST to configurable endpoint when wired.
+  const ENDPOINT = ""; // e.g. "https://formspree.io/f/xxxxxxx"
+
+  function attachForm(formId, noteId) {
+    const form = document.getElementById(formId);
+    const note = document.getElementById(noteId);
+    if (!form) return;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = form.elements.email.value.trim();
+      const context = form.elements.context ? form.elements.context.value.trim() : "";
+      if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        note.textContent = "Enter a valid email.";
+        note.dataset.tone = "warn";
+        return;
+      }
+      note.textContent = "Sending…";
+      note.dataset.tone = "neutral";
+
+      const payload = { email, context, at: new Date().toISOString(), source: location.href };
+
+      try {
+        if (ENDPOINT) {
+          const res = await fetch(ENDPOINT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+        } else {
+          const key = "apicover.waitlist";
+          const list = JSON.parse(localStorage.getItem(key) || "[]");
+          list.push(payload);
+          localStorage.setItem(key, JSON.stringify(list));
+        }
+        note.textContent = "On the list. We'll reply soon.";
+        note.dataset.tone = "ok";
+        form.reset();
+      } catch (err) {
+        note.textContent = "Couldn't send. Email hello@apicover.com instead.";
+        note.dataset.tone = "warn";
+      }
+    });
+  }
+
+  attachForm("waitlist-hero", "waitlist-hero-note");
+  attachForm("waitlist-main", "waitlist-main-note");
+</script>
+
+</body>
+</html>

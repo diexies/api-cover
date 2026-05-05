@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Inspector middleware for ASP.NET Core: API discovery, scenario engine, breakpoints, run history.</Description>
+    <PackageId>APICover</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JsonLogic" Version="6.0.2" />
+    <PackageReference Include="JsonPath.Net" Version="3.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\APICover.Abstractions\APICover.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="APICover.Tests" />
+    <InternalsVisibleTo Include="APICover.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="APICover — visual state-space tester for HTTP APIs. Cover every branch. Every variant. Before production does." />
+  <meta name="theme-color" content="#fdfcfc" />
+  <title>APICover — Cover every branch. Every variant.</title>
+  <link rel="icon" type="image/svg+xml" href="./assets/logo.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<nav class="nav" aria-label="Primary">
+  <div class="nav-inner">
+    <a class="brand" href="#top" aria-label="APICover home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 18 18" width="18" height="18" fill="none">
+          <line x1="9" y1="6" x2="9" y2="16" stroke="currentColor" stroke-width="1.25" />
+          <line x1="9" y1="6" x2="3.5" y2="2" stroke="currentColor" stroke-width="1.25" />
+          <line x1="9" y1="6" x2="14.5" y2="2" stroke="currentColor" stroke-width="1.25" />
+          <circle cx="9" cy="6" r="1.6" fill="#ff4704" />
+        </svg>
+      </span>
+      <span class="brand-word">APICover</span>
+    </a>
+    <ul class="nav-links" role="list">
+      <li><a href="#demo">Demo</a></li>
+      <li><a href="#why">Why</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#apply">Apply</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a class="pill ghost" href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+      <a class="pill filled" href="#apply">Apply</a>
+    </div>
+  </div>
+</nav>
+
+<main id="main">
+  <span id="top" tabindex="-1"></span>
+
+  <!-- ======================================================================
+       HERO
+       ====================================================================== -->
+  <section class="hero" data-reveal>
+    <div class="hero-inner">
+      <p class="eyebrow">
+        <span class="dot live" aria-hidden="true"></span>
+        closed alpha &nbsp;·&nbsp; 0.1.0
+      </p>
+
+      <h1 class="display">
+        <span class="line">Cover every branch.</span>
+        <span class="line">Every variant.</span>
+        <span class="line muted">Before production does.</span>
+      </h1>
+
+      <aside class="lede">
+        APICover is a visual state-space tester for HTTP APIs. Attach it to
+        your ASP.NET Core app, watch it discover every endpoint, and compose
+        scenarios as a DAG. Drop a Case Set on any node and the engine forks
+        the run into a tree of branches — one trace per behavior your API
+        can exhibit.
+      </aside>
+
+      <div class="hero-cta">
+        <a class="pill filled" href="#apply">Apply for access</a>
+        <a class="pill ghost" href="#demo">See it work</a>
+      </div>
+
+      <p class="hero-foot">
+        Five seats per week. One reply, then either access or a no.
+      </p>
+    </div>
+  </section>
+
+  <!-- ======================================================================
+       DEMO SPREAD (3 frames)
+       ====================================================================== -->
+  <section id="demo" class="spread" data-reveal aria-label="What APICover sees">
+    <div class="spread-inner">
+
+      <p class="spread-title">
+        <span>This is what APICover sees</span>
+        <span class="meta">sample · billing service · POST /invoices</span>
+      </p>
+
+      <!-- Frame 1: Canvas -->
+      <article class="frame frame-canvas" aria-label="Scenario canvas">
+        <header class="frame-head">
+          <span class="frame-eyebrow">canvas</span>
+          <span class="frame-meta">checkout flow · 5 endpoints · 1 case set</span>
+        </header>
+        <div class="canvas">
+          <svg class="canvas-svg" viewBox="0 0 920 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <!-- Edges -->
+            <path d="M170 60 C 220 60, 240 60, 280 60" />
+            <path d="M170 60 C 220 60, 240 110, 280 110" />
+            <path d="M170 60 C 220 60, 240 160, 280 160" />
+            <path d="M430 60  C 480 60,  500 110, 540 110" />
+            <path d="M430 110 C 480 110, 500 110, 540 110" />
+            <path d="M430 160 C 480 160, 500 110, 540 110" />
+            <path d="M690 110 C 730 110, 750 110, 790 110" />
+            <!-- Arrowhead -->
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+              </marker>
+            </defs>
+          </svg>
+
+          <div class="node n-root">
+            <span class="node-kind">POST</span>
+            <span class="node-path">/auth/login</span>
+            <span class="node-fork" title="Case set: 3 variants">⑂3</span>
+          </div>
+          <div class="node n-a"><span class="node-kind">GET</span><span class="node-path">/cart/{id}</span><span class="node-tag">v1</span></div>
+          <div class="node n-b"><span class="node-kind">GET</span><span class="node-path">/cart/{id}</span><span class="node-tag">v2</span></div>
+          <div class="node n-c"><span class="node-kind">GET</span><span class="node-path">/cart/{id}</span><span class="node-tag">v3</span></div>
+          <div class="node n-d"><span class="node-kind">POST</span><span class="node-path">/checkout</span></div>
+          <div class="node n-e"><span class="node-kind">POST</span><span class="node-path">/invoices</span><span class="node-cursor" aria-hidden="true"></span></div>
+        </div>
+      </article>
+
+      <!-- Frame 2: Internals -->
+      <article class="frame frame-internals" aria-label="Internals tree for POST /invoices">
+        <header class="frame-head">
+          <span class="frame-eyebrow">internals</span>
+          <span class="frame-meta">POST /invoices · IL walk · 6 calls · generated 12s ago</span>
+        </header>
+        <ol class="cg" role="list">
+          <li class="cg-row depth-0">
+            <span class="cg-step">1</span>
+            <span class="cg-badge k-ctrl">controller</span>
+            <span class="cg-name"><strong>BillingController</strong>.CreateInvoice</span>
+            <span class="cg-loc">Billing.cs:24</span>
+          </li>
+          <li class="cg-row depth-1">
+            <span class="cg-step">2</span>
+            <span class="cg-rail" aria-hidden="true"></span>
+            <span class="cg-badge k-iface">interface</span>
+            <span class="cg-name"><strong>IInvoiceService</strong>.CreateAsync</span>
+            <span class="cg-impl">→ InvoiceService</span>
+            <span class="cg-loc">Invoicing.cs:18</span>
+          </li>
+          <li class="cg-row depth-2">
+            <span class="cg-step">3</span>
+            <span class="cg-rail" aria-hidden="true"></span>
+            <span class="cg-badge k-iface">interface</span>
+            <span class="cg-name"><strong>IPaymentGateway</strong>.ChargeAsync</span>
+            <span class="cg-impl">→ PaymentGateway</span>
+            <span class="cg-loc">Invoicing.cs:38</span>
+          </li>
+          <li class="cg-row depth-3">
+            <span class="cg-step">4</span>
+            <span class="cg-rail" aria-hidden="true"></span>
+            <span class="cg-badge k-ext">→ external HTTP</span>
+            <span class="cg-name">HttpClient.PostAsJsonAsync</span>
+            <span class="cg-note">payments.example.com/charge</span>
+            <span class="cg-loc">Invoicing.cs:42</span>
+          </li>
+          <li class="cg-row depth-2">
+            <span class="cg-step">5</span>
+            <span class="cg-rail" aria-hidden="true"></span>
+            <span class="cg-badge k-iface">interface</span>
+            <span class="cg-name"><strong>IInvoiceRepository</strong>.AddAsync</span>
+            <span class="cg-impl">→ InvoiceRepository</span>
+            <span class="cg-loc">Invoicing.cs:64</span>
+          </li>
+          <li class="cg-row depth-3">
+            <span class="cg-step">6</span>
+            <span class="cg-rail" aria-hidden="true"></span>
+            <span class="cg-badge k-db">db</span>
+            <span class="cg-name">AppDbContext.SaveChangesAsync</span>
+            <span class="cg-loc">Invoicing.cs:71</span>
+          </li>
+        </ol>
+      </article>
+
+      <!-- Frame 3: Branches -->
+      <article class="frame frame-branches" aria-label="Branch tree results">
+        <header class="frame-head">
+          <span class="frame-eyebrow">branches</span>
+          <span class="frame-meta">3 leaves · 7 calls · 412ms · 2 passed · 1 expected fail</span>
+        </header>
+        <ul class="branches" role="list">
+          <li class="branch ok">
+            <span class="branch-path">v1/v1</span>
+            <span class="branch-label">Case: valid-card &nbsp;·&nbsp; Retry: none</span>
+            <span class="branch-status"><span class="status-pill ok">✓</span><span class="status-code">201 Created</span></span>
+          </li>
+          <li class="branch ok">
+            <span class="branch-path">v1/v2</span>
+            <span class="branch-label">Case: valid-card &nbsp;·&nbsp; Retry: auto</span>
+            <span class="branch-status"><span class="status-pill ok">✓</span><span class="status-code">201 Created</span></span>
+          </li>
+          <li class="branch warn">
+            <span class="branch-path">v2/v1</span>
+            <span class="branch-label">Case: declined &nbsp;·&nbsp; Retry: none</span>
+            <span class="branch-status"><span class="status-pill warn">!</span><span class="status-code">402 Payment Required &nbsp;<span class="muted">expected</span></span></span>
+          </li>
+        </ul>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ======================================================================
+       PULL-QUOTE
+       ====================================================================== -->
+  <section id="why" class="quote" data-reveal>
+    <div class="quote-inner">
+      <p class="quote-body">
+        Postman runs <em>one path</em>. Cypress writes <em>code</em>. k6 measures <em>load</em>.
+        APICover renders the <em>join</em>.
+      </p>
+      <p class="quote-attribution">— why APICover exists</p>
+    </div>
+  </section>
+
+  <!-- ======================================================================
+       HOW IT WORKS — magazine spread
+       ====================================================================== -->
+  <section id="how" class="how" data-reveal>
+    <div class="how-inner">
+      <p class="eyebrow">How it works</p>
+      <h2 class="heading">A snippet, an attach, a canvas.</h2>
+
+      <ol class="steps" role="list">
+
+        <li class="step" data-reveal>
+          <span class="step-num" aria-hidden="true">1</span>
+          <div class="step-body">
+            <h3>Attach.</h3>
+            <p>
+              One package. One <code>AddAPICover</code>. The middleware
+              mounts at <code>/apicover/ui</code> and discovers your endpoints
+              from the live route table — same source of truth as the framework
+              itself, so a new controller appears the next time the host starts.
+            </p>
+          </div>
+        </li>
+
+        <li class="step snippet-step">
+          <div class="snippet" aria-label="C# install snippet">
+<pre><code><span class="kw">using</span> APICover.Inspector;
+
+<span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+
+builder.Services.<span class="fn">AddAPICover</span>(opts =&gt;
+{
+    opts.EnableCallGraphInspection = <span class="lit">true</span>;
+});
+
+<span class="kw">var</span> app = builder.Build();
+
+app.<span class="fn">UseAPICover</span>();   <span class="cmt">// /apicover/ui — open it.</span>
+app.<span class="fn">MapControllers</span>();
+app.Run();</code></pre>
+          </div>
+        </li>
+
+        <li class="step" data-reveal>
+          <span class="step-num" aria-hidden="true">2</span>
+          <div class="step-body">
+            <h3>Compose.</h3>
+            <p>
+              Drag endpoints onto the canvas. Wire them. Path, query, headers
+              and body accept inline JSONLogic against a live <code>RunContext</code>
+              — pull <code>nodes.login.response.token</code> straight into the
+              next request. No glue code. No bindings layer.
+            </p>
+          </div>
+        </li>
+
+        <li class="step" data-reveal>
+          <span class="step-num" aria-hidden="true">3</span>
+          <div class="step-body">
+            <h3>Branch.</h3>
+            <p>
+              Right-click any node, add a Case Set with <em>N</em> variants —
+              <span class="mono">{ valid-card, declined, expired-token }</span>,
+              whatever shape your behavior takes. The engine forks the run at
+              the anchor, deep-clones the run context per variant, and runs the
+              downstream subtree once per branch.
+            </p>
+          </div>
+        </li>
+
+        <li class="step" data-reveal>
+          <span class="step-num" aria-hidden="true">4</span>
+          <div class="step-body">
+            <h3>Inspect.</h3>
+            <p>
+              Open the <em>internals</em> tab on any endpoint. APICover walks
+              the IL of the handler, classifies each call (interface, external
+              HTTP, database), resolves DI to the concrete impl, and renders
+              the call graph with PDB file:line annotations. You see what the
+              box actually does — not what its README claims.
+            </p>
+          </div>
+        </li>
+
+      </ol>
+    </div>
+  </section>
+
+  <!-- ======================================================================
+       APPLY (waitlist)
+       ====================================================================== -->
+  <section id="apply" class="apply" data-reveal>
+    <div class="apply-inner">
+      <p class="eyebrow">Closed alpha</p>
+      <h2 class="apply-heading">Apply.</h2>
+
+      <p class="apply-lede">
+        We let in five vibe-coded backend teams a week. Tell us what you're
+        shipping. We reply within a few days with access and a setup
+        walkthrough.
+      </p>
+
+      <form id="waitlist" class="apply-form" novalidate>
+        <label class="field">
+          <span class="lbl">Work email</span>
+          <input
+            type="email"
+            name="email"
+            required
+            autocomplete="email"
+            placeholder="you@company.com"
+            spellcheck="false"
+          />
+        </label>
+
+        <label class="field">
+          <span class="lbl">What are you building? <span class="lbl-opt">— optional</span></span>
+          <textarea
+            name="context"
+            rows="3"
+            placeholder="ASP.NET Core API for a B2B billing product. Mostly AI-written. Need to understand what flows actually exist before we ship v1."
+          ></textarea>
+        </label>
+
+        <div class="apply-actions">
+          <button type="submit" class="pill filled big">
+            <span class="dot ember" aria-hidden="true"></span>
+            Request access
+            <span class="arrow" aria-hidden="true">→</span>
+          </button>
+          <span class="form-note" id="waitlist-note" aria-live="polite"></span>
+        </div>
+      </form>
+
+      <p class="apply-foot">
+        We don't share emails. We don't run drip campaigns. One reply, then
+        either access or a no.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<!-- ======================================================================
+     COLOPHON
+     ====================================================================== -->
+<footer class="colophon">
+  <div class="colophon-inner">
+    <span class="brand small">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 18 18" width="14" height="14" fill="none">
+          <line x1="9" y1="6" x2="9" y2="16" stroke="currentColor" stroke-width="1.25" />
+          <line x1="9" y1="6" x2="3.5" y2="2" stroke="currentColor" stroke-width="1.25" />
+          <line x1="9" y1="6" x2="14.5" y2="2" stroke="currentColor" stroke-width="1.25" />
+          <circle cx="9" cy="6" r="1.6" fill="#ff4704" />
+        </svg>
+      </span>
+      <span class="brand-word">APICover</span>
+    </span>
+
+    <span class="colophon-tag">Cover every branch. Every variant.</span>
+
+    <ul class="colophon-links" role="list">
+      <li><a href="#demo">Demo</a></li>
+      <li><a href="#why">Why</a></li>
+      <li><a href="#how">How</a></li>
+      <li><a href="#apply">Apply</a></li>
+      <li><a href="https://github.com" target="_blank" rel="noreferrer">GitHub</a></li>
+    </ul>
+
+    <p class="masthead">
+      Issue 0.1.0-alpha &nbsp;·&nbsp; 2026 &nbsp;·&nbsp; apicover.com
+    </p>
+  </div>
+</footer>
+
+<script src="./app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Authors>Diexies</Authors>
+    <Product>APICover</Product>
+    <Version>0.1.0-alpha</Version>
+  </PropertyGroup>
+
+  <PropertyGroup Label="NuGet">
+    <PackageProjectUrl>https://github.com/osmanyagar/utopia</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/osmanyagar/utopia</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>aspnetcore;api-testing;state-space;branching;scenario;dag</PackageTags>
+    <Copyright>Copyright (c) 2026 Diexies</Copyright>
+  </PropertyGroup>
+</Project>

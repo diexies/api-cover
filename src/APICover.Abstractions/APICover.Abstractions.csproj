@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Public abstractions and contracts for APICover.</Description>
+    <PackageId>APICover.Abstractions</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JsonLogic" Version="6.0.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Embedded React-based web UI provider for APICover.</Description>
+    <PackageId>APICover.UI.Web</PackageId>
+    <UiSourceDir>$(MSBuildThisFileDirectory)..\..\ui</UiSourceDir>
+    <UiDistDir>$(UiSourceDir)\dist</UiDistDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\APICover\APICover.csproj" />
+  </ItemGroup>
+
+  <!--
+    Build the React UI before our own build, then embed every emitted file. The first run pays
+    for `npm ci`; subsequent builds skip it. Set `<SkipUiBuild>true</SkipUiBuild>` to short-circuit
+    when the dist folder is already up to date (e.g. on CI that runs npm separately).
+  -->
+  <Target Name="BuildReactUi" BeforeTargets="BeforeBuild" Condition="'$(SkipUiBuild)' != 'true'">
+    <Exec Command="npm ci" WorkingDirectory="$(UiSourceDir)" Condition="!Exists('$(UiSourceDir)\node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(UiSourceDir)" />
+  </Target>
+
+  <Target Name="EmbedReactDist" BeforeTargets="BeforeBuild" DependsOnTargets="BuildReactUi">
+    <ItemGroup>
+      <_UiDistFile Include="$(UiDistDir)\**\*.*" />
+      <EmbeddedResource Include="@(_UiDistFile)">
+        <!-- LogicalName must be unique; build "ui/<relative>/<filename>.<ext>" per file. -->
+        <LogicalName>ui/%(_UiDistFile.RecursiveDir)%(_UiDistFile.Filename)%(_UiDistFile.Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+
+</Project>
