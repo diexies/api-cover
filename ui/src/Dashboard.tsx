@@ -56,10 +56,26 @@ function HomeSection({
   endpoints: EndpointDescriptor[]; scenarios: Scenario[]; runs: Run[];
   onOpenStats: () => void; onOpenScenarios: () => void; onOpenGlobalSettings: () => void;
 }) {
+  // First-run state: no scenarios saved. Surface a 3-step checklist as the primary
+  // CTA cluster instead of dropping the user into an inert hero strip with zero counts.
+  const isFirstRun = scenarios.length === 0;
+
   return (
     <>
       <h1 className="dash2-title">APICover</h1>
-      <p className="dash2-sub">choose where to start</p>
+      <p className="dash2-sub">
+        {isFirstRun ? 'set up your first business flow' : 'choose where to start'}
+      </p>
+      <div className="dash2-hint" aria-hidden="true">
+        Press <kbd>{isMac() ? '⌘' : 'Ctrl'}</kbd>+<kbd>K</kbd> to search anywhere
+      </div>
+
+      {isFirstRun && (
+        <FirstRunChecklist
+          endpoints={endpoints}
+          onOpenGlobalSettings={onOpenGlobalSettings}
+        />
+      )}
 
       <div className="hero-cards">
         <HeroCard
@@ -91,6 +107,64 @@ function HomeSection({
         <span className="ie-bar-half ie-export">⤒ Export</span>
       </button>
     </>
+  );
+}
+
+/**
+ * First-run onboarding strip: three sequential steps. Each step ticks off as the
+ * underlying state is satisfied so a brand-new user has a single linear path from
+ * "I just installed this" to "I have a working scenario".
+ */
+function FirstRunChecklist({
+  endpoints,
+  onOpenGlobalSettings,
+}: {
+  endpoints: EndpointDescriptor[];
+  onOpenGlobalSettings: () => void;
+}) {
+  const apiReady = endpoints.length > 0;
+
+  const steps: { done: boolean; title: string; hint: string; action?: () => void; actionLabel?: string }[] = [
+    {
+      done: apiReady,
+      title: 'Connect your API',
+      hint: apiReady
+        ? `${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'} discovered from the live route table.`
+        : 'Add `app.UseAPICover()` to your ASP.NET host. Refresh once the app is running.',
+    },
+    {
+      done: false,
+      title: 'Create your first flow',
+      hint: 'Use the “new flow” control in the sidebar. Name it after a business behavior — e.g. checkout, signup.',
+    },
+    {
+      done: false,
+      title: 'Add credentials (optional)',
+      hint: 'If endpoints require auth, configure global credentials so every flow inherits them.',
+      action: onOpenGlobalSettings,
+      actionLabel: 'open settings',
+    },
+  ];
+
+  return (
+    <ol className="first-run-checklist" aria-label="getting started">
+      {steps.map((step, i) => (
+        <li key={i} className={`first-run-step ${step.done ? 'is-done' : ''}`}>
+          <span className="first-run-num" aria-hidden="true">
+            {step.done ? '✓' : i + 1}
+          </span>
+          <div className="first-run-body">
+            <div className="first-run-title">{step.title}</div>
+            <div className="first-run-hint">{step.hint}</div>
+            {step.action && (
+              <button type="button" className="first-run-action" onClick={step.action}>
+                {step.actionLabel}
+              </button>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -183,7 +257,15 @@ function ScenariosSection({ onBack, scenarios, runs }: {
   return (
     <>
       <SectionHead title="Scenarios Details" onBack={onBack} />
-      {scenarios.length === 0 && <div className="muted">no scenarios yet</div>}
+      {scenarios.length === 0 && (
+        <div className="empty-state" role="status">
+          <div className="empty-state-icon" aria-hidden="true"><IconBeaker /></div>
+          <div className="empty-state-title">No scenarios yet</div>
+          <div className="empty-state-body">
+            Use the “new flow” control in the sidebar to compose your first business flow.
+          </div>
+        </div>
+      )}
       <div className="scn-list">
         {scenarios.map((s) => {
           const rs = runsByScenario.get(s.id) ?? [];
@@ -240,3 +322,8 @@ function coverage(endpoints: EndpointDescriptor[], scenarios: Scenario[]) {
 }
 
 function normalisePath(p: string): string { return p.replace(/\{([^:}]+):[^}]+\}/g, '{$1}'); }
+
+function isMac(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
+}

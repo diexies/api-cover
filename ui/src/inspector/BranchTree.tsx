@@ -16,15 +16,36 @@ export function BranchTree({ run, caseSets }: Props) {
   const branches = useMemo(() => groupBranches(run, caseSets ?? []), [run, caseSets]);
   if (!run || branches.length === 0) return null;
 
+  // Worst-wins rollup across all branches: any failure dominates, then running, then
+  // pending; succeeded only when every leaf succeeded. Mirrors Vitest/Playwright semantics.
+  const rollup = rollupAggregate(branches);
+  const totals = branches.reduce(
+    (acc, b) => {
+      acc.passed += b.aggregate === 'succeeded' ? 1 : 0;
+      acc.failed += b.aggregate === 'failed' ? 1 : 0;
+      acc.running += b.aggregate === 'running' ? 1 : 0;
+      acc.skipped += b.aggregate === 'skipped' ? 1 : 0;
+      return acc;
+    },
+    { passed: 0, failed: 0, running: 0, skipped: 0 },
+  );
+
   return (
     <div className="branch-tree">
       <div className="branch-tree-head">
         <span className="term-heading term-heading-comment">{`# branch tree (${branches.length} leaf${branches.length === 1 ? '' : 'es'})`}</span>
+        <BranchStatusPill aggregate={rollup} />
+        <span className="branch-tree-totals" aria-label="branch totals">
+          <span className="branch-tree-total ok" title="passed">{totals.passed}/{branches.length}</span>
+          {totals.failed > 0 && <span className="branch-tree-total fail" title="failed">✗ {totals.failed}</span>}
+          {totals.running > 0 && <span className="branch-tree-total run" title="running">⏵ {totals.running}</span>}
+          {totals.skipped > 0 && <span className="branch-tree-total skip" title="skipped">⊘ {totals.skipped}</span>}
+        </span>
       </div>
       <ul className="branch-tree-list">
         {branches.map((b) => (
           <li key={b.key}>
-            <span className={`branch-status branch-status-${b.aggregate}`}>{b.aggregate}</span>
+            <BranchStatusPill aggregate={b.aggregate} />
             <code className="branch-path-key">{b.key || 'root'}</code>
             <span className="muted small">
               {`${b.results.length} node${b.results.length === 1 ? '' : 's'}`}
@@ -39,6 +60,35 @@ export function BranchTree({ run, caseSets }: Props) {
       </ul>
     </div>
   );
+}
+
+const STATUS_ICON: Record<BranchSummary['aggregate'], string> = {
+  succeeded: '✓',
+  failed: '✗',
+  running: '⏵',
+  pending: '·',
+  skipped: '⊘',
+};
+
+function BranchStatusPill({ aggregate }: { aggregate: BranchSummary['aggregate'] }) {
+  return (
+    <span
+      className={`branch-status branch-status-${aggregate}`}
+      role="status"
+      aria-label={aggregate}
+    >
+      <span aria-hidden="true">{STATUS_ICON[aggregate]}</span>
+      <span>{aggregate}</span>
+    </span>
+  );
+}
+
+function rollupAggregate(branches: BranchSummary[]): BranchSummary['aggregate'] {
+  if (branches.some((b) => b.aggregate === 'failed')) return 'failed';
+  if (branches.some((b) => b.aggregate === 'running')) return 'running';
+  if (branches.every((b) => b.aggregate === 'succeeded')) return 'succeeded';
+  if (branches.every((b) => b.aggregate === 'skipped')) return 'skipped';
+  return 'pending';
 }
 
 interface BranchSummary {

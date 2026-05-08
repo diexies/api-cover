@@ -11,6 +11,7 @@ import { loadAuth, saveAuth, type AuthConfig } from './auth';
 import { useResizableWidth } from './useResizableWidth';
 import { AgentPanel } from './AgentPanel';
 import { ServiceMapPanel } from './inspector/ServiceMapPanel';
+import { CommandPalette, type PaletteCommand } from './CommandPalette';
 
 type SidebarMode = 'scenarios' | 'endpoints' | 'services' | 'inspector';
 
@@ -165,6 +166,56 @@ export function App() {
     setSidebar('scenarios');
   }
 
+  // Build the global command palette: navigate to any scenario, create one, jump
+  // into settings or specialty panels. Recomputed when scenarios/agent/feature flags change.
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const cmds: PaletteCommand[] = [];
+    for (const s of scenarios) {
+      cmds.push({
+        id: `open:${s.id}`,
+        label: s.name || s.id,
+        hint: `${s.nodes.length} node${s.nodes.length === 1 ? '' : 's'}`,
+        group: 'flow',
+        run: () => setSelectedId(s.id),
+      });
+    }
+    cmds.push({
+      id: 'go:dashboard',
+      label: 'Open dashboard',
+      group: 'nav',
+      run: () => { setSelectedId(null); setSidebar('scenarios'); },
+    });
+    cmds.push({
+      id: 'go:settings',
+      label: 'Open global settings',
+      group: 'nav',
+      run: () => setGlobalSettingsOpen(true),
+    });
+    if (enableCallGraph) {
+      cmds.push({
+        id: 'go:inspector',
+        label: 'Open system inspector',
+        group: 'nav',
+        run: () => { setSelectedId(null); setSidebar('inspector'); },
+      });
+      cmds.push({
+        id: 'go:services',
+        label: 'Open service catalog',
+        group: 'nav',
+        run: () => { setSelectedId(null); setSidebar('services'); },
+      });
+    }
+    if (agentStatus) {
+      cmds.push({
+        id: 'go:agent',
+        label: 'Open Claude agent',
+        group: 'nav',
+        run: () => setAgentPanelOpen(true),
+      });
+    }
+    return cmds;
+  }, [scenarios, enableCallGraph, agentStatus]);
+
   const totalNodes = scenarios.reduce((acc, s) => acc + s.nodes.length, 0);
   // Tone: 'good' green, 'warn' orange, 'bad' red. Coverage-style ratios feed the colour;
   // raw-count items are neutral-good unless empty.
@@ -302,6 +353,7 @@ export function App() {
           />
         )}
       </div>
+      <CommandPalette commands={paletteCommands} />
     </div>
   );
 }

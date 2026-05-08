@@ -236,6 +236,10 @@ export function NodeInspector({
         counts={counts}
         dimmed={dimmedTabs}
         hidden={enableCallGraph ? [] : ['internals']}
+        errored={[
+          ...(bodyError ? ['request' as InspectorTab] : []),
+          ...(shouldRunError ? ['wiring' as InspectorTab] : []),
+        ]}
         onChange={setActiveTab}
       />
 
