@@ -71,6 +71,7 @@ public static class APICoverServiceCollectionExtensions
         services.TryAddSingleton<IlWalker>();
         services.TryAddSingleton<ICallGraphService, CallGraphService>();
         services.TryAddSingleton<IServiceCatalogService, ServiceCatalogService>();
+        services.TryAddSingleton<IServiceMapService, ServiceMapBuilder>();
         services.AddHostedService<CallGraphWarmupHostedService>();
 
         return services;
@@ -99,11 +100,16 @@ public static class APICoverApplicationBuilderExtensions
         var prefix = options.PathPrefix.TrimEnd('/');
 
         var uiProviders = app.ApplicationServices.GetServices<IAPICoverUiProvider>().ToList();
+        var endpointExtensions = app.ApplicationServices.GetServices<IAPICoverEndpointExtension>().ToList();
 
         app.UseRouting();
         app.UseEndpoints(endpoints =>
         {
             APICoverEndpoints.MapAll(endpoints, prefix);
+            foreach (var extension in endpointExtensions)
+            {
+                extension.MapEndpoints(endpoints, prefix);
+            }
             foreach (var provider in uiProviders)
             {
                 provider.MapUi(endpoints, prefix);

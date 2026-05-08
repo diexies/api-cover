@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react';
 import type { AuthConfig, AuthType, ApiKeyLocation } from './auth';
+import { AgentSettingsTab } from './AgentSettingsTab';
+import type { AgentStatus } from './api';
 
 interface Props {
   initialAuth: AuthConfig;
   onSaveAuth: (cfg: AuthConfig) => void;
   onClose: () => void;
+  agentStatus: AgentStatus | null;
+  onAgentChanged?: () => void;
 }
 
-type Tab = 'auth' | 'settings';
+type Tab = 'auth' | 'agent' | 'settings';
 
 /**
  * Workspace-level centred modal. Closing (backdrop click / Escape / explicit close button)
  * auto-persists the current auth state — there are no Save/Cancel buttons.
  */
-export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose }: Props) {
+export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose, agentStatus, onAgentChanged }: Props) {
   const [tab, setTab] = useState<Tab>('auth');
   const [auth, setAuth] = useState<AuthConfig>(initialAuth);
 
@@ -47,6 +51,9 @@ export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose }: Props)
 
         <div className="tabs" role="tablist">
           <button className={tab === 'auth' ? 'tab active' : 'tab'} onClick={() => setTab('auth')}>Auth</button>
+          {agentStatus && (
+            <button className={tab === 'agent' ? 'tab active' : 'tab'} onClick={() => setTab('agent')}>AI Agent</button>
+          )}
           <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>Settings</button>
         </div>
 
@@ -154,6 +161,12 @@ export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose }: Props)
             {auth.type === 'none' && (
               <div className="muted">No credentials will be attached to runs.</div>
             )}
+          </div>
+        )}
+
+        {tab === 'agent' && agentStatus && (
+          <div className="tab-pane">
+            <AgentSettingsTab status={agentStatus} onChanged={onAgentChanged} />
           </div>
         )}
 

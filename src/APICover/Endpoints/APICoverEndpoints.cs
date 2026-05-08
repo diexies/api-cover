@@ -67,6 +67,14 @@ internal static class APICoverEndpoints
             return Results.Json(catalog, Json);
         });
 
+        // Service map — topology view (nodes + edges + metrics + islands).
+        api.MapGet("/service-map", async (IServiceMapService svc, IOptions<APICoverOptions> o) =>
+        {
+            if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
+            var map = await svc.BuildAsync();
+            return Results.Json(map, Json);
+        });
+
         api.MapGet("/discovery/grouped", (IEndpointDiscoveryService disc)
             => Results.Json(DiscoveryGrouping.Group(disc.GetEndpoints()), Json));
 

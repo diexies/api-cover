@@ -1,0 +1,160 @@
+using System.Text.Json.Nodes;
+using APICover.Agent.Anthropic;
+
+namespace APICover.Agent.Tools;
+
+/// <summary>
+/// The static set of tools exposed to Claude in M1. Names match what the dispatcher
+/// switches on. Schemas are JSON Schema (draft 2020-12 subset Anthropic accepts).
+/// </summary>
+public static class ToolRegistry
+{
+    public const string ListEndpoints = "list_endpoints";
+    public const string GetEndpointDetails = "get_endpoint_details";
+    public const string ReadMemory = "read_memory";
+    public const string ListMemory = "list_memory";
+    public const string WriteMemory = "write_memory";
+    public const string AppendMemory = "append_memory";
+    public const string DeleteMemory = "delete_memory";
+
+    public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
+
+    private static IReadOnlyList<ToolDefinition> BuildDefinitions()
+    {
+        return new[]
+        {
+            new ToolDefinition
+            {
+                Name = ListEndpoints,
+                Description =
+                    "List the HTTP endpoints exposed by this ASP.NET Core application. "
+                  + "Returns a slim summary per endpoint (id, method, path, area, purpose). "
+                  + "Call this first when asked about the API. Use get_endpoint_details for "
+                  + "the full descriptor of any single endpoint.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "area": {
+                      "type": "string",
+                      "description": "Optional area filter (case-insensitive prefix match against EndpointDescriptor.Area)."
+                    },
+                    "methodFilter": {
+                      "type": "string",
+                      "description": "Optional HTTP method filter (e.g. 'GET'). Case-insensitive.",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+                    }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = GetEndpointDetails,
+                Description =
+                    "Fetch the full EndpointDescriptor for a single endpoint, including "
+                  + "parameters with JSON schemas, request body schema, response schemas, "
+                  + "auth requirements, and sample payloads. Required input: the endpoint id "
+                  + "as returned by list_endpoints (e.g. 'POST /users').",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Endpoint identifier (METHOD /path) from list_endpoints."
+                    }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = ReadMemory,
+                Description =
+                    "Read a memory file by relative path (e.g. 'controllers/payment.md'). "
+                  + "Returns the markdown content or an error if missing. Use this BEFORE "
+                  + "answering any question — memory holds prior agent runs' findings.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": { "type": "string", "description": "Relative path under memory root, must end in .md" }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = ListMemory,
+                Description =
+                    "List memory files. Use this first to see what memory exists. Optional "
+                  + "prefix narrows to a sub-tree (e.g. 'services/'). Returns paths + sizes.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "prefix": { "type": "string", "description": "Optional path prefix filter, e.g. 'services/'." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = WriteMemory,
+                Description =
+                    "Create or replace a memory file. Use for fresh artifacts (a new "
+                  + "controller summary) or when wholesale-rewriting an outdated file. "
+                  + "Prefer append_memory for incremental additions to keep human edits "
+                  + "intact. Path must end in .md and live under root.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string", "description": "Full markdown body. Replaces any existing file at this path." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = AppendMemory,
+                Description =
+                    "Append to an existing memory file. Creates the file with the supplied "
+                  + "content if it doesn't exist. Use to add a learned-during-run section "
+                  + "without overwriting prior content or human edits.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["path", "content"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string", "description": "Markdown to append. Include a leading newline if the file already has content." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = DeleteMemory,
+                Description =
+                    "Delete a memory file. Use ONLY when the file describes something that "
+                  + "no longer exists in the project (e.g. a controller has been removed). "
+                  + "When in doubt, leave it alone — humans can clean up.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": { "type": "string" }
+                  }
+                }
+                """)!
+            }
+        };
+    }
+}

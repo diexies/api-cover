@@ -3,14 +3,16 @@ import { ScenarioCanvas } from './ScenarioCanvas';
 import { ScenarioList } from './ScenarioList';
 import { ServiceCatalogPanel } from './ServiceCatalogPanel';
 import { EndpointPalette } from './EndpointPalette';
-import { getInspectorOptions, getScenario, listEndpoints, listRuns, listScenarios, saveScenario, type EndpointDescriptor, type Run, type Scenario } from './api';
+import { getAgentStatus, getInspectorOptions, getScenario, listEndpoints, listRuns, listScenarios, saveScenario, type AgentStatus, type EndpointDescriptor, type Run, type Scenario } from './api';
 import { GlobalSettingsModal } from './GlobalSettingsModal';
 import { NewScenarioControl } from './NewScenarioControl';
 import { Dashboard } from './Dashboard';
 import { loadAuth, saveAuth, type AuthConfig } from './auth';
 import { useResizableWidth } from './useResizableWidth';
+import { AgentPanel } from './AgentPanel';
+import { ServiceMapPanel } from './inspector/ServiceMapPanel';
 
-type SidebarMode = 'scenarios' | 'endpoints' | 'services';
+type SidebarMode = 'scenarios' | 'endpoints' | 'services' | 'inspector';
 
 const LAST_SCENARIO_KEY = 'apicover.lastScenarioId';
 
@@ -40,10 +42,18 @@ export function App() {
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [auth, setAuth] = useState<AuthConfig>(() => loadAuth());
   const [enableCallGraph, setEnableCallGraph] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
 
   useEffect(() => {
     getInspectorOptions().then((o) => setEnableCallGraph(!!o.enableCallGraph)).catch(() => {});
   }, []);
+
+  async function refreshAgentStatus() {
+    const s = await getAgentStatus();
+    setAgentStatus(s);
+  }
+  useEffect(() => { refreshAgentStatus(); }, []);
   const sidebarSize = useResizableWidth('utopia.sidebar.width', 380, 240, 640);
 
   useEffect(() => {
@@ -203,17 +213,33 @@ export function App() {
                 <h2>Business Flows</h2>
                 <NewScenarioControl onCreate={createScenario} existingIds={scenarios.map((s) => s.id)} onError={setError} />
                 {enableCallGraph && (
-                  <button className="settings-btn" title="Service catalog" onClick={() => setSidebar('services')}>⛁</button>
+                  <>
+                    <button className="settings-btn" title="System inspector" onClick={() => setSidebar('inspector')}>📡</button>
+                    <button className="settings-btn" title="Service catalog" onClick={() => setSidebar('services')}>⛁</button>
+                  </>
                 )}
               </div>
               <ScenarioList scenarios={scenarios} selectedId={selectedId} onSelect={setSelectedId} />
             </>
+          )}
+          {sidebar === 'inspector' && (
+            <div className="sidebar-head">
+              <button className="back-arrow" onClick={() => setSidebar('scenarios')} title="Back">←</button>
+              <span className="current-scenario">System Inspector</span>
+            </div>
           )}
           {sidebar === 'endpoints' && selected && (
             <>
               <div className="sidebar-head back-row">
                 <button className="back-arrow" onClick={backToScenarios} title="Back to scenarios">←</button>
                 <span className="current-scenario">{selected.name}</span>
+                {agentStatus && (
+                  <button
+                    className="settings-btn"
+                    title="Claude agent"
+                    onClick={() => setAgentPanelOpen(true)}
+                  >✦</button>
+                )}
                 <button className="settings-btn" title="Global settings" onClick={() => setGlobalSettingsOpen(true)}>⚙</button>
               </div>
               <EndpointPalette onError={setError} />
@@ -233,6 +259,8 @@ export function App() {
               initialAuth={auth}
               onSaveAuth={(cfg) => { setAuth(cfg); saveAuth(cfg); }}
               onClose={() => setGlobalSettingsOpen(false)}
+              agentStatus={agentStatus}
+              onAgentChanged={refreshAgentStatus}
             />
           )}
         </aside>
@@ -243,7 +271,10 @@ export function App() {
         />
         <main className="content">
           {error && <div className="error banner">{error}</div>}
-          {!selected && !error && (
+          {sidebar === 'inspector' && (
+            <ServiceMapPanel onClose={() => setSidebar('scenarios')} />
+          )}
+          {sidebar !== 'inspector' && !selected && !error && (
             <Dashboard
               scenarios={scenarios}
               endpoints={endpoints}
@@ -251,7 +282,7 @@ export function App() {
               onOpenGlobalSettings={() => setGlobalSettingsOpen(true)}
             />
           )}
-          {selected && (
+          {sidebar !== 'inspector' && selected && (
             <ScenarioCanvas
               scenario={selected}
               endpointLookup={endpointLookup}
@@ -263,6 +294,13 @@ export function App() {
             />
           )}
         </main>
+        {agentPanelOpen && agentStatus && (
+          <AgentPanel
+            status={agentStatus}
+            onClose={() => setAgentPanelOpen(false)}
+            onOpenSettings={() => { setAgentPanelOpen(false); setGlobalSettingsOpen(true); }}
+          />
+        )}
       </div>
     </div>
   );

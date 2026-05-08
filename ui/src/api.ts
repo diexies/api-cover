@@ -385,6 +385,59 @@ export async function listEndpoints(): Promise<EndpointDescriptor[]> {
   return r.json();
 }
 
+// ---------------------------------------------------------------------------
+// Service map — topology view (Inspector)
+// ---------------------------------------------------------------------------
+
+export type ServiceMapNodeKind = 'endpoint' | 'service' | 'externalHttp' | 'database';
+export type ServiceMapEdgeKind = 'invokes' | 'calls' | 'http' | 'database';
+
+export interface ServiceMapMetrics {
+  fanIn: number;
+  fanOut: number;
+  depth: number;
+  externalReach: number;
+  databaseReach: number;
+  serviceReach: number;
+  siblingEndpoints: number;
+  instability: number | null;
+  coupling: number;
+}
+
+export interface ServiceMapNode {
+  id: string;
+  kind: ServiceMapNodeKind;
+  label: string;
+  fullName?: string;
+  resolvedImplType?: string;
+  isInterface?: boolean;
+  httpMethod?: string;
+  area?: string;
+  metrics: ServiceMapMetrics;
+  islandIndex: number;
+}
+
+export interface ServiceMapEdge {
+  from: string;
+  to: string;
+  kind: ServiceMapEdgeKind;
+  callSites: number;
+}
+
+export interface ServiceMap {
+  generatedAt: string;
+  nodes: ServiceMapNode[];
+  edges: ServiceMapEdge[];
+  islands: string[][];
+}
+
+export async function getServiceMap(): Promise<ServiceMap | null> {
+  const r = await fetch(`${apiBase}/service-map`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 export interface RunEvent {
   type:
     | 'runStarted'
@@ -439,6 +492,257 @@ export function subscribeRunEvents(
         }
       } catch (err) {
         console.error(`Failed to parse SSE ${name}:`, err);
+      }
+    });
+  }
+  if (onError) es.onerror = onError;
+  return () => es.close();
+}
+
+// ---------------------------------------------------------------------------
+// Embedded Claude agent (APICover.Agent package). Endpoints under /agent/*
+// are only mounted when the agent package is present. The UI probes
+// /agent/status on load: 404 → hide all agent UI; 200 → render.
+// ---------------------------------------------------------------------------
+
+export interface AgentStatus {
+  available: true;
+  model: string;
+  allowApiKey: boolean;
+  allowMaxSubscription: boolean;
+  maxDetected: boolean;
+  maxVersion?: string;
+  mode: 'Disabled' | 'ApiKey' | 'Max';
+  hasApiKey: boolean;
+  dailyDollarCap?: number;
+  globalDailyDollarCap?: number;
+  maxTokensPerRun: number;
+  maxToolCallsPerRun: number;
+  memoryRoot: string;
+  memoryFileCount: number;
+  memoryEmpty: boolean;
+}
+
+export interface AgentCredentials {
+  mode: 'Disabled' | 'ApiKey' | 'Max';
+  hasApiKey: boolean;
+  lastFourChars?: string;
+  dailyDollarCap?: number;
+  maxDetected: boolean;
+  maxVersion?: string;
+  maxError?: string;
+}
+
+export async function getAgentStatus(): Promise<AgentStatus | null> {
+  try {
+    const r = await fetch(`${apiBase}/agent/status`);
+    if (r.status === 404) return null;
+    if (!r.ok) return null;
+    return r.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getAgentCredentials(): Promise<AgentCredentials> {
+  const r = await fetch(`${apiBase}/agent/credentials`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function saveAgentCredentials(payload: {
+  mode: 'Disabled' | 'ApiKey' | 'Max';
+  apiKey?: string;
+  dailyDollarCap?: number;
+}): Promise<{ ok: boolean; mode: string }> {
+  const r = await fetch(`${apiBase}/agent/credentials`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body?.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+export async function deleteAgentCredentials(): Promise<void> {
+  const r = await fetch(`${apiBase}/agent/credentials`, { method: 'DELETE' });
+  if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+}
+
+export async function testAgentCredentials(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase}/agent/credentials/test`, { method: 'POST' });
+  return r.json();
+}
+
+export type AgentEventType =
+  | 'RunStarted'
+  | 'RunCompleted'
+  | 'RunFailed'
+  | 'BudgetExhausted'
+  | 'Narration'
+  | 'ReadingMemory'
+  | 'WritingMemory'
+  | 'DiscoveringEndpoints'
+  | 'ExaminingEndpoint'
+  | 'ToolError'
+  | 'ComposingResponse'
+  | 'AssistantMessage'
+  | 'UsageUpdate'
+  | 'TextDelta'
+  | 'ToolCallStarted'
+  | 'ToolCallCompleted';
+
+export interface AgentEvent {
+  type: AgentEventType;
+  runId: string;
+  timestamp: string;
+  summary?: string;
+  path?: string;
+  endpointId?: string;
+  count?: number;
+  durationMs?: number;
+  text?: string;
+  toolCallId?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  toolOutput?: unknown;
+  toolIsError?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+  dollarsSpentInRun?: number;
+  dollarsSpentToday?: number;
+  dailyDollarCap?: number;
+  error?: string;
+  stopReason?: string;
+}
+
+export interface SessionTotals {
+  inputTokens: number;
+  outputTokens: number;
+  dollars: number;
+  toolCalls: number;
+}
+
+export interface SessionSummary {
+  id: string;
+  prompt: string;
+  mode: string;
+  startedAt: string;
+  completedAt?: string;
+  status: string;
+  totals: SessionTotals;
+}
+
+export interface SessionDoc extends SessionSummary {
+  model: string;
+  events: AgentEvent[];
+  error?: string;
+}
+
+export async function listAgentSessions(take = 50): Promise<{ root: string; count: number; sessions: SessionSummary[] }> {
+  const r = await fetch(`${apiBase}/agent/sessions/?take=${take}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function getAgentSession(id: string): Promise<SessionDoc | null> {
+  const r = await fetch(`${apiBase}/agent/sessions/${encodeURIComponent(id)}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function deleteAgentSession(id: string): Promise<void> {
+  const r = await fetch(`${apiBase}/agent/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+}
+
+export async function startAgentRun(prompt: string, mode: 'chat' | 'scan' = 'chat'): Promise<{ runId: string; mode: string }> {
+  const r = await fetch(`${apiBase}/agent/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, mode }),
+  });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body?.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+export interface MemoryEntry {
+  path: string;
+  bytes: number;
+  updatedAt: string;
+}
+
+export async function listMemory(): Promise<{ root: string; count: number; files: MemoryEntry[] }> {
+  const r = await fetch(`${apiBase}/agent/memory/`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function readMemoryFile(path: string): Promise<{ path: string; content: string } | null> {
+  const r = await fetch(`${apiBase}/agent/memory/file?path=${encodeURIComponent(path)}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function writeMemoryFile(path: string, content: string): Promise<void> {
+  const r = await fetch(`${apiBase}/agent/memory/file`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content }),
+  });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body?.error || `HTTP ${r.status}`);
+  }
+}
+
+export async function deleteMemoryFile(path: string): Promise<void> {
+  const r = await fetch(`${apiBase}/agent/memory/file?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  });
+  if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+}
+
+export function subscribeAgentEvents(
+  runId: string,
+  onEvent: (evt: AgentEvent) => void,
+  onError?: (e: Event) => void
+): () => void {
+  const url = `${apiBase}/agent/runs/${encodeURIComponent(runId)}/events`;
+  const es = new EventSource(url);
+  const names: AgentEvent['type'][] = [
+    'RunStarted',
+    'RunCompleted',
+    'RunFailed',
+    'BudgetExhausted',
+    'Narration',
+    'ReadingMemory',
+    'WritingMemory',
+    'DiscoveringEndpoints',
+    'ExaminingEndpoint',
+    'ToolError',
+    'ComposingResponse',
+    'AssistantMessage',
+    'UsageUpdate',
+    'TextDelta',
+    'ToolCallStarted',
+    'ToolCallCompleted',
+  ];
+  for (const name of names) {
+    es.addEventListener(name, (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        onEvent(data);
+      } catch (err) {
+        console.error(`Failed to parse agent SSE ${name}:`, err);
       }
     });
   }

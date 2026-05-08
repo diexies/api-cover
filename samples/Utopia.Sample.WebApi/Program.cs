@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using APICover.Agent.Hosting;
 using APICover.Discovery;
 using APICover.Hosting;
 using APICover.UI.Web;
@@ -26,6 +27,7 @@ builder.Services.AddAPICover(opts =>
     opts.EnableCallGraphInspection = true;
 });
 builder.Services.AddAPICoverWebUI();
+builder.Services.AddAPICoverAgent();
 
 var app = builder.Build();
 

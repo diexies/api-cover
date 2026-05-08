@@ -1,6 +1,10 @@
 bin/
 obj/
 out/
+
+# Sample app runtime artifacts (agent memory + sessions populated by tests)
+samples/Utopia.Sample.WebApi/docs/
+
 *.user
 *.suo
 .vs/

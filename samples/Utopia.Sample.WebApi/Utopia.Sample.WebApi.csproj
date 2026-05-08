@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
     <ProjectReference Include="..\..\src\APICover\APICover.csproj" />
+    <ProjectReference Include="..\..\src\APICover.Agent\APICover.Agent.csproj" />
     <ProjectReference Include="..\..\src\APICover.Storage.Sqlite\APICover.Storage.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\APICover.UI.Web\APICover.UI.Web.csproj" />
   </ItemGroup>
