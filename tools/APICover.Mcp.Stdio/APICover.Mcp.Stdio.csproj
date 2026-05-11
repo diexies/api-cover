@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>apicover-mcp</ToolCommandName>
+    <PackageId>APICover.Mcp.Stdio</PackageId>
+    <Description>Stdio entry point for the APICover MCP server. Run inside a workspace; IDE LLMs (Cursor, Claude Desktop, VS Code Copilot) connect via the standard MCP stdio transport.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\APICover\APICover.csproj" />
+    <ProjectReference Include="..\..\src\APICover.Mcp\APICover.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

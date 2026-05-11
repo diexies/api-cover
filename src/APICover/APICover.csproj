@@ -21,6 +21,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="APICover.Tests" />
     <InternalsVisibleTo Include="APICover.IntegrationTests" />
+    <InternalsVisibleTo Include="APICover.Mcp" />
   </ItemGroup>
 
 </Project>

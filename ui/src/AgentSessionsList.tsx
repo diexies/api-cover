@@ -3,7 +3,9 @@ import { type SessionSummary, listAgentSessions } from './api';
 
 interface Props {
   onPick: (id: string) => void;
-  onClose: () => void;
+  /** Optional dismiss handler. When omitted (e.g. inline embedding), the
+   *  list renders without a close button and skips the Esc-to-close binding. */
+  onClose?: () => void;
   activeId: string | null;
 }
 
@@ -17,6 +19,7 @@ export function AgentSessionsList({ onPick, onClose, activeId }: Props) {
 
   useEffect(() => { reload(); }, []);
   useEffect(() => {
+    if (!onClose) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -38,7 +41,9 @@ export function AgentSessionsList({ onPick, onClose, activeId }: Props) {
     <div className="agent-sessions" role="dialog">
       <div className="agent-sessions-head">
         <h4>Recent runs</h4>
-        <button className="agent-panel-iconbtn" onClick={onClose} title="Close">×</button>
+        {onClose && (
+          <button className="agent-panel-iconbtn" onClick={onClose} title="Close">×</button>
+        )}
       </div>
       {loading && <div className="muted small">Loading…</div>}
       {error && <div className="agent-panel-error">{error}</div>}

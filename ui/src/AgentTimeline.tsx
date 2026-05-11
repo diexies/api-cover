@@ -8,6 +8,8 @@ interface Props {
   showRaw?: boolean;
   /** Title for the user prompt that started this timeline (rendered above). */
   prompt?: string;
+  /** Optional slash-command mode label (e.g. "scenario") shown next to the user bubble. */
+  promptMode?: string | null;
 }
 
 /**
@@ -15,11 +17,21 @@ interface Props {
  * to a row via the {@link eventDisplay} table. Live runs and replayed sessions
  * use the same component — animation kicks in on first mount of each row.
  */
-export function AgentTimeline({ events, showRaw, prompt }: Props) {
+export function AgentTimeline({ events, showRaw, prompt, promptMode }: Props) {
+  // Replayed session events come from disk JSON serialised with a camelCase
+  // naming policy (e.g. "assistantMessage"), while live SSE events use the
+  // PascalCase enum form ("AssistantMessage"). Normalise here so eventDisplay
+  // lookups succeed for both paths.
+  const normalised = useMemo(
+    () => events.map((e) => (e.type && /^[a-z]/.test(e.type as string)
+      ? { ...e, type: ((e.type as string)[0].toUpperCase() + (e.type as string).slice(1)) as AgentEvent['type'] }
+      : e)),
+    [events]
+  );
   const rows = useMemo(() => {
     const out: AgentEvent[] = [];
     let composingBuffer: string | null = null;
-    for (const evt of events) {
+    for (const evt of normalised) {
       const display = eventDisplay[evt.type];
       if (!display) continue;
       if (display.hidden && !showRaw) continue;
@@ -38,7 +50,7 @@ export function AgentTimeline({ events, showRaw, prompt }: Props) {
       out.push(evt);
     }
     return out;
-  }, [events, showRaw]);
+  }, [normalised, showRaw]);
 
   // A categorised work event is "running" until the next iteration's tool starts
   // — but in practice each tool dispatch is synchronous from the timeline's view
@@ -60,6 +72,9 @@ export function AgentTimeline({ events, showRaw, prompt }: Props) {
       {prompt && (
         <div className="agent-timeline-prompt">
           <span className="agent-timeline-prompt-role">you</span>
+          {promptMode && (
+            <span className="agent-timeline-prompt-mode" data-mode={promptMode}>/{promptMode}</span>
+          )}
           <span className="agent-timeline-prompt-text">{prompt}</span>
         </div>
       )}

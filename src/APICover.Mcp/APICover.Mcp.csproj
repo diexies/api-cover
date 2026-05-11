@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Model Context Protocol (MCP) server for APICover. Exposes scenarios, runs, endpoints, memory, coverage, and git impact as MCP tools so any IDE LLM (Cursor, VS Code Copilot, Cline, Zed, Claude Code, Windsurf) can author and inspect tests through its own model.</Description>
+    <PackageId>APICover.Mcp</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pinned to 1.3.0 — the first stable train post-1.0 (2026-05). Streamable HTTP
+         is default; legacy /sse is opt-in. STJ-only, net8+. -->
+    <PackageReference Include="ModelContextProtocol" Version="1.3.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\APICover\APICover.csproj" />
+    <ProjectReference Include="..\APICover.Abstractions\APICover.Abstractions.csproj" />
+    <ProjectReference Include="..\APICover.Agent\APICover.Agent.csproj" />
+  </ItemGroup>
+
+</Project>

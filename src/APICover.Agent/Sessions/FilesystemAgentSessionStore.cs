@@ -11,7 +11,10 @@ internal sealed class FilesystemAgentSessionStore : IAgentSessionStore
     {
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        // PascalCase enum strings keep session JSON aligned with SSE event names
+        // and the UI's eventDisplay map. The frontend still tolerates legacy
+        // camelCase types so existing sessions replay correctly.
+        Converters = { new JsonStringEnumConverter() }
     };
 
     private readonly string _root;

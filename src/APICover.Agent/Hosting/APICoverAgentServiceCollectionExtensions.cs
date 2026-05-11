@@ -46,7 +46,7 @@ public static class APICoverAgentServiceCollectionExtensions
 
         services.TryAddSingleton<MaxSubscriptionProbe>();
         services.TryAddSingleton<CredentialEncryption>();
-        services.TryAddSingleton<IAgentCredentialStore, InMemoryAgentCredentialStore>();
+        services.TryAddSingleton<IAgentCredentialStore, FilesystemAgentCredentialStore>();
         services.TryAddSingleton<IClaudeCredentialProvider, CredentialResolver>();
 
         services.TryAddSingleton<AnthropicHttpClient>(sp => new AnthropicHttpClient(
@@ -75,6 +75,10 @@ public static class APICoverAgentServiceCollectionExtensions
             });
 
         services.AddSingleton<IAPICoverEndpointExtension, AgentEndpointExtension>();
+
+        // Background bootstrap: if memory is empty + credentials present at startup,
+        // auto-fire a scan so the user lands on a populated workspace.
+        services.AddHostedService<MemoryAutoBootstrap>();
 
         return services;
     }

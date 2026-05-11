@@ -20,6 +20,9 @@ public sealed class AgentRunRecord
     public required DateTimeOffset StartedAt { get; init; }
     public DateTimeOffset? CompletedAt { get; set; }
     public AgentRunStatus Status { get; set; } = AgentRunStatus.Pending;
+    /// <summary>Run mode (chat / scan / scenario). Recorded so the UI can find an
+    /// in-flight scan after a refresh and re-show its progress.</summary>
+    public string? Mode { get; set; }
     public string? Error { get; set; }
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }

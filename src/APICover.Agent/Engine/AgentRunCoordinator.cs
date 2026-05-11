@@ -109,7 +109,8 @@ public sealed class AgentRunCoordinator
             Id = runId,
             Prompt = prompt,
             StartedAt = DateTimeOffset.UtcNow,
-            Status = AgentRunStatus.Running
+            Status = AgentRunStatus.Running,
+            Mode = mode.ToString().ToLowerInvariant(),
         };
         _store.Save(record);
 

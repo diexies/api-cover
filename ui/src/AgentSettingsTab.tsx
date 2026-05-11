@@ -89,50 +89,51 @@ export function AgentSettingsTab({ status, onChanged }: Props) {
   const apiKeyAllowed = status.allowApiKey;
 
   return (
-    <div className="agent-settings">
-      <p className="muted small">
+    <div className="gs-form">
+      <p className="gs-intro">
         The agent reads your live API discovery to answer questions. Pick how it authenticates
         with Anthropic. The API key is encrypted at rest with ASP.NET Data Protection — the UI
         only ever sees the last four characters once stored.
       </p>
 
-      <div className="auth-types">
+      <div className="gs-segments" role="radiogroup" aria-label="agent mode">
         <button
-          className={`auth-type ${mode === 'Disabled' ? 'active' : ''}`}
+          type="button" role="radio" aria-checked={mode === 'Disabled'}
+          className={`gs-segment${mode === 'Disabled' ? ' is-active' : ''}`}
           onClick={() => setMode('Disabled')}
         >Disabled</button>
         <button
-          className={`auth-type ${mode === 'Max' ? 'active' : ''}${maxAvailable ? '' : ' disabled'}`}
+          type="button" role="radio" aria-checked={mode === 'Max'}
+          className={`gs-segment${mode === 'Max' ? ' is-active' : ''}`}
           onClick={() => maxAvailable && setMode('Max')}
           disabled={!maxAvailable}
           title={maxAvailable ? `claude CLI ${status.maxVersion ?? ''}` : 'claude CLI not detected on server PATH'}
         >Max subscription</button>
         <button
-          className={`auth-type ${mode === 'ApiKey' ? 'active' : ''}${apiKeyAllowed ? '' : ' disabled'}`}
+          type="button" role="radio" aria-checked={mode === 'ApiKey'}
+          className={`gs-segment${mode === 'ApiKey' ? ' is-active' : ''}`}
           onClick={() => apiKeyAllowed && setMode('ApiKey')}
           disabled={!apiKeyAllowed}
         >API key</button>
       </div>
 
       {mode === 'Max' && (
-        <div className="auth-form">
-          <p>
-            {maxAvailable
-              ? <>Detected <code>claude</code> CLI{status.maxVersion ? <> ({status.maxVersion})</> : null}. The agent will spawn it as a child process and use your Max quota.</>
-              : <>The <code>claude</code> CLI is not on the server's PATH. Install Claude Code on the host running APICover, or switch to API-key mode.</>}
-          </p>
-          <p className="muted small">
+        <div className="gs-callout">
+          {maxAvailable
+            ? <>Detected <code>claude</code> CLI{status.maxVersion ? <> ({status.maxVersion})</> : null}. The agent will spawn it as a child process and use your Max quota.</>
+            : <>The <code>claude</code> CLI is not on the server's PATH. Install Claude Code on the host running APICover, or switch to API-key mode.</>}
+          <div className="gs-callout-sub">
             Max mode does not support tool calls in M1 — for richer "scan project" runs, use API-key mode.
-          </p>
+          </div>
         </div>
       )}
 
       {mode === 'ApiKey' && (
-        <div className="auth-form">
-          <label className="form-row stacked">
-            <span className="form-label">API key</span>
+        <div className="gs-fields">
+          <label className="gs-field">
+            <span className="gs-field-label">API key</span>
             <input
-              className="form-input"
+              className="gs-field-input"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -140,20 +141,20 @@ export function AgentSettingsTab({ status, onChanged }: Props) {
               autoComplete="off"
             />
             {credentials?.hasApiKey && !apiKey && (
-              <span className="muted small">Stored. Leave blank to keep the existing key.</span>
+              <span className="gs-field-hint">Stored. Leave blank to keep the existing key.</span>
             )}
           </label>
-          <label className="form-row stacked">
-            <span className="form-label">Daily dollar cap</span>
+          <label className="gs-field">
+            <span className="gs-field-label">Daily dollar cap</span>
             <input
-              className="form-input"
+              className="gs-field-input"
               type="number"
               min={0.5}
               step={0.5}
               value={dailyCap}
               onChange={(e) => setDailyCap(Number(e.target.value))}
             />
-            <span className="muted small">
+            <span className="gs-field-hint">
               Hard ceiling on Anthropic spend per day. Combined with global cap{' '}
               {status.globalDailyDollarCap ? `($${status.globalDailyDollarCap.toFixed(2)})` : '(none)'} —
               whichever is lower wins. Resets at 00:00 UTC.
@@ -162,19 +163,19 @@ export function AgentSettingsTab({ status, onChanged }: Props) {
         </div>
       )}
 
-      {error && <div className="agent-panel-error">{error}</div>}
+      {error && <div className="gs-banner gs-banner-error">{error}</div>}
       {testResult && (
-        <div className={testResult.ok ? 'agent-msg-system' : 'agent-panel-error'}>
+        <div className={`gs-banner ${testResult.ok ? 'gs-banner-ok' : 'gs-banner-error'}`}>
           {testResult.ok ? '✓ Connection works.' : `✗ ${testResult.error ?? 'Test failed.'}`}
         </div>
       )}
 
-      <div className="modal-foot agent-settings-actions">
-        <button className="agent-panel-send-btn" onClick={save} disabled={saving}>
+      <div className="gs-actions">
+        <button className="gs-btn" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>
         {credentials?.mode !== 'Disabled' && (
-          <button className="link-btn" onClick={test} disabled={testing}>
+          <button className="gs-btn gs-btn-ghost" onClick={test} disabled={testing}>
             {testing ? 'Testing…' : 'Test connection'}
           </button>
         )}

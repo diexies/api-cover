@@ -59,4 +59,11 @@ public sealed class AgentOptions
     /// with the project's git history alongside the memory.
     /// </summary>
     public string? SessionsRoot { get; set; }
+
+    /// <summary>
+    /// Filesystem path for the persisted credential record. Default resolves to
+    /// <c>{ContentRoot}/docs/apicover-agent/credentials.json</c>. The encrypted API
+    /// key is opaque ciphertext (Data Protection); plaintext is never written.
+    /// </summary>
+    public string? CredentialsPath { get; set; }
 }

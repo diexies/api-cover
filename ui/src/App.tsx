@@ -12,8 +12,10 @@ import { useResizableWidth } from './useResizableWidth';
 import { AgentPanel } from './AgentPanel';
 import { ServiceMapPanel } from './inspector/ServiceMapPanel';
 import { CommandPalette, type PaletteCommand } from './CommandPalette';
+import { coverage } from './home/utils';
 
 type SidebarMode = 'scenarios' | 'endpoints' | 'services' | 'inspector';
+type DashboardSection = 'home' | 'stats' | 'scenarios';
 
 const LAST_SCENARIO_KEY = 'apicover.lastScenarioId';
 
@@ -44,7 +46,31 @@ export function App() {
   const [auth, setAuth] = useState<AuthConfig>(() => loadAuth());
   const [enableCallGraph, setEnableCallGraph] = useState(false);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
-  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [dashboardSection, setDashboardSection] = useState<DashboardSection>('home');
+  // Agent panel only docks on the home dashboard — scenario canvas and
+  // inspector own their own real estate. The home composer is the single
+  // affordance for sending a prompt; no manual open/close button.
+  const onHome = !selected && sidebar !== 'inspector' && dashboardSection === 'home';
+  const agentDocked = !!agentStatus && onHome;
+  // Composer hand-off: home composer drops a prompt here, AgentPanel reads it
+  // on mount via initialPrompt + autoStart, then onPromptConsumed clears it.
+  const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null);
+  const [pendingAgentMode, setPendingAgentMode] = useState<string | null>(null);
+
+  function openAgentWithPrompt(text: string, mode?: string | null) {
+    setPendingAgentPrompt(text);
+    setPendingAgentMode(mode ?? null);
+  }
+
+  // Open the global settings modal, optionally pinning a specific tab. The
+  // modal reads the active tab from localStorage on mount, so writing the
+  // key first makes the open land where the caller intends.
+  function openGlobalSettings(tab?: 'auth' | 'agent' | 'settings') {
+    if (tab) {
+      try { localStorage.setItem('apicover.settingsTab', tab); } catch { /* quota */ }
+    }
+    setGlobalSettingsOpen(true);
+  }
 
   useEffect(() => {
     getInspectorOptions().then((o) => setEnableCallGraph(!!o.enableCallGraph)).catch(() => {});
@@ -205,58 +231,78 @@ export function App() {
         run: () => { setSelectedId(null); setSidebar('services'); },
       });
     }
-    if (agentStatus) {
-      cmds.push({
-        id: 'go:agent',
-        label: 'Open Claude agent',
-        group: 'nav',
-        run: () => setAgentPanelOpen(true),
-      });
-    }
     return cmds;
-  }, [scenarios, enableCallGraph, agentStatus]);
+  }, [scenarios, enableCallGraph]);
 
-  const totalNodes = scenarios.reduce((acc, s) => acc + s.nodes.length, 0);
-  // Tone: 'good' green, 'warn' orange, 'bad' red. Coverage-style ratios feed the colour;
-  // raw-count items are neutral-good unless empty.
-  type Tone = 'good' | 'warn' | 'bad';
-  const apiCovered = endpoints.length; // placeholder: real coverage when wired up
-  const apiTotal = endpoints.length;
-  const scnRun = scenarios.length;
-  const scnTotal = scenarios.length;
+  // Live workspace numbers — surfaced permanently in the top nav so the
+  // user always knows where they stand without leaving the active screen.
+  const cov = coverage(endpoints, scenarios);
+  // Coverage tone drives the stats card's left rail colour, giving the bar a
+  // colourful at-a-glance read of how covered the project actually is.
+  const covTone = cov.pct >= 70 ? 'good' : cov.pct >= 30 ? 'warn' : 'bad';
 
-  function ratioTone(part: number, total: number): Tone {
-    if (total === 0) return 'bad';
-    const pct = part / total;
-    if (pct >= 0.7) return 'good';
-    if (pct >= 0.3) return 'warn';
-    return 'bad';
+  function gotoSection(section: DashboardSection) {
+    setSelectedId(null);
+    setSidebar('scenarios');
+    setDashboardSection(section);
   }
-  function countTone(n: number): Tone { return n > 0 ? 'good' : 'bad'; }
-
-  const stats: { label: string; value: string; tone: Tone }[] = [
-    { label: 'project', value: '1', tone: 'good' },
-    { label: 'apis', value: `${apiCovered}/${apiTotal}`, tone: ratioTone(apiCovered, apiTotal) },
-    { label: 'scenarios', value: `${scnRun}/${scnTotal}`, tone: ratioTone(scnRun, scnTotal) },
-    { label: 'nodes', value: `${totalNodes}`, tone: countTone(totalNodes) },
-  ];
 
   return (
     <div className="app">
-      {!selected && (
-        <header className="centered-header">
-          <ul className="header-stats">
-            {stats.map((s) => (
-              <li key={s.label}>
-                <span className={`hs-dot tone-${s.tone}`} />
-                <span className="hs-value">{s.value}</span>
-                <span className="hs-label">{s.label}</span>
-              </li>
-            ))}
-          </ul>
-        </header>
-      )}
-      <div className="layout">
+      <header className="topnav" aria-label="workspace summary">
+        <button
+          type="button"
+          className="topnav-brand"
+          onClick={() => gotoSection('home')}
+          title="Open dashboard"
+        >
+          <span className="topnav-brand-spark" aria-hidden="true">✦</span>
+          <span className="topnav-brand-text">APICover</span>
+        </button>
+        <div className={`topnav-stats tone-${covTone}`} role="group" aria-label="workspace stats">
+          <span className="topnav-stat stat-apis">
+            <span className="topnav-stat-label">apis</span>
+            <span className="topnav-stat-value">{endpoints.length}</span>
+          </span>
+          <span className="topnav-sep" aria-hidden="true">·</span>
+          <span className="topnav-stat stat-scenarios">
+            <span className="topnav-stat-label">scenarios</span>
+            <span className="topnav-stat-value">{scenarios.length}</span>
+          </span>
+          <span className="topnav-sep" aria-hidden="true">·</span>
+          <span className={`topnav-stat stat-coverage tone-${covTone}`}>
+            <span className="topnav-stat-label">coverage</span>
+            <span className="topnav-stat-value">{cov.pct}%</span>
+          </span>
+          <span className="topnav-sep" aria-hidden="true">·</span>
+          <span className="topnav-stat stat-runs">
+            <span className="topnav-stat-label">runs</span>
+            <span className="topnav-stat-value">{runs.length}</span>
+          </span>
+        </div>
+        <div className="topnav-tiles">
+          <button
+            type="button"
+            className="topnav-tile is-icon tile-stats"
+            onClick={() => gotoSection('stats')}
+            title="Statistics"
+            aria-label="statistics"
+          >
+            <span className="topnav-tile-icon" aria-hidden="true">◧</span>
+          </button>
+          <button
+            type="button"
+            className="topnav-tile is-icon tile-settings"
+            onClick={() => setGlobalSettingsOpen(true)}
+            title="Settings"
+            aria-label="settings"
+          >
+            <span className="topnav-tile-icon" aria-hidden="true">⚙</span>
+          </button>
+        </div>
+      </header>
+      <div className={`layout${agentDocked ? ' is-agent-docked' : ''}${sidebar === 'inspector' ? ' is-fullbleed' : ''}`}>
+        {sidebar !== 'inspector' && (
         <aside className="sidebar" style={{ width: sidebarSize.width }}>
           {sidebar === 'scenarios' && (
             <>
@@ -273,24 +319,11 @@ export function App() {
               <ScenarioList scenarios={scenarios} selectedId={selectedId} onSelect={setSelectedId} />
             </>
           )}
-          {sidebar === 'inspector' && (
-            <div className="sidebar-head">
-              <button className="back-arrow" onClick={() => setSidebar('scenarios')} title="Back">←</button>
-              <span className="current-scenario">System Inspector</span>
-            </div>
-          )}
           {sidebar === 'endpoints' && selected && (
             <>
               <div className="sidebar-head back-row">
                 <button className="back-arrow" onClick={backToScenarios} title="Back to scenarios">←</button>
                 <span className="current-scenario">{selected.name}</span>
-                {agentStatus && (
-                  <button
-                    className="settings-btn"
-                    title="Claude agent"
-                    onClick={() => setAgentPanelOpen(true)}
-                  >✦</button>
-                )}
                 <button className="settings-btn" title="Global settings" onClick={() => setGlobalSettingsOpen(true)}>⚙</button>
               </div>
               <EndpointPalette onError={setError} />
@@ -315,11 +348,14 @@ export function App() {
             />
           )}
         </aside>
-        <div
-          className="resize-handle vertical"
-          onMouseDown={(e) => sidebarSize.startResize(e, 'right')}
-          title="Drag to resize sidebar"
-        />
+        )}
+        {sidebar !== 'inspector' && (
+          <div
+            className="resize-handle vertical"
+            onMouseDown={(e) => sidebarSize.startResize(e, 'right')}
+            title="Drag to resize sidebar"
+          />
+        )}
         <main className="content">
           {error && <div className="error banner">{error}</div>}
           {sidebar === 'inspector' && (
@@ -330,7 +366,13 @@ export function App() {
               scenarios={scenarios}
               endpoints={endpoints}
               runs={runs}
-              onOpenGlobalSettings={() => setGlobalSettingsOpen(true)}
+              agentEnabled={agentDocked}
+              agentStatus={agentStatus}
+              auth={auth}
+              section={dashboardSection}
+              onSectionChange={setDashboardSection}
+              onOpenGlobalSettings={(tab) => openGlobalSettings(tab)}
+              onSendPrompt={openAgentWithPrompt}
             />
           )}
           {sidebar !== 'inspector' && selected && (
@@ -345,11 +387,15 @@ export function App() {
             />
           )}
         </main>
-        {agentPanelOpen && agentStatus && (
+        {agentDocked && agentStatus && (
           <AgentPanel
             status={agentStatus}
-            onClose={() => setAgentPanelOpen(false)}
-            onOpenSettings={() => { setAgentPanelOpen(false); setGlobalSettingsOpen(true); }}
+            onOpenSettings={(tab) => openGlobalSettings(tab)}
+            initialPrompt={pendingAgentPrompt ?? undefined}
+            initialPromptMode={pendingAgentMode ?? undefined}
+            autoStart={pendingAgentPrompt !== null}
+            onPromptConsumed={() => { setPendingAgentPrompt(null); setPendingAgentMode(null); }}
+            onStatusChanged={setAgentStatus}
           />
         )}
       </div>

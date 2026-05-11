@@ -149,6 +149,24 @@ public static class AgentEndpoints
             }
         });
 
+        // Snapshot of in-flight runs. Used by the UI to detect that a scan started
+        // before a page refresh is still running, so the memory tab can keep the
+        // "Scanning…" affordance instead of inviting a duplicate scan.
+        agent.MapGet("/runs/active", (IAgentRunStore store) =>
+        {
+            var active = store.List(50)
+                .Where(r => r.Status == AgentRunStatus.Running)
+                .Select(r => new
+                {
+                    runId = r.Id,
+                    mode = r.Mode,
+                    startedAt = r.StartedAt,
+                    prompt = r.Prompt,
+                })
+                .ToArray();
+            return Results.Json(new { count = active.Length, runs = active }, Json);
+        });
+
         agent.MapPost("/runs", async (HttpRequest request, AgentRunCoordinator coordinator) =>
         {
             using var doc = await JsonDocument.ParseAsync(request.Body);

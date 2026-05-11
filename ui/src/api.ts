@@ -254,6 +254,78 @@ export async function listRuns(scenarioId?: string): Promise<Run[]> {
   return r.json();
 }
 
+export interface GitCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  date: string;
+  traced: boolean;
+}
+export interface GitLogResponse {
+  commits: GitCommit[];
+  lastScenarioUpdate: string | null;
+}
+export async function getGitLog(take = 25): Promise<GitLogResponse> {
+  const r = await fetch(`${apiBase}/git/log?take=${take}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export interface GitCommitFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+export interface GitCommitDetail {
+  sha: string;
+  subject: string;
+  body: string;
+  author: string;
+  date: string;
+  files: GitCommitFile[];
+}
+export async function getGitCommit(sha: string): Promise<GitCommitDetail | null> {
+  const r = await fetch(`${apiBase}/git/commit/${encodeURIComponent(sha)}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export interface McpToolMeta {
+  name: string;
+  description: string;
+}
+export interface McpInfo {
+  enabled: boolean;
+  httpUrl: string;
+  stdioCommand: string;
+  requireAuth: boolean;
+  tools: McpToolMeta[];
+  playbook: string;
+}
+export async function getMcpInfo(): Promise<McpInfo | null> {
+  const r = await fetch(`${apiBase}/mcp/info`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export interface ActiveAgentRun {
+  runId: string;
+  mode: string | null;
+  startedAt: string;
+  prompt: string;
+}
+export async function listActiveAgentRuns(): Promise<ActiveAgentRun[]> {
+  const r = await fetch(`/apicover/api/agent/runs/active`);
+  if (!r.ok) return [];
+  const j = await r.json();
+  return Array.isArray(j.runs) ? j.runs : [];
+}
+
 export interface QuickCallRequest {
   method: string;
   path: string;
@@ -415,6 +487,8 @@ export interface ServiceMapNode {
   area?: string;
   metrics: ServiceMapMetrics;
   islandIndex: number;
+  level: number;
+  isIsolated?: boolean;
 }
 
 export interface ServiceMapEdge {

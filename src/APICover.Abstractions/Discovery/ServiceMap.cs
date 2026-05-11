@@ -59,6 +59,18 @@ public sealed class ServiceMapNode
 
     /// <summary>Index into <see cref="ServiceMap.Islands"/>.</summary>
     public required int IslandIndex { get; init; }
+
+    /// <summary>BFS distance from the synthetic <c>app:host</c> root over the
+    /// undirected projection of the call graph. <c>0</c> for the root, then
+    /// handler classes, services, impls, boundaries. Drives the concentric ring
+    /// layout in the UI: tier N nodes settle on the Nth ring.</summary>
+    public required int Level { get; init; }
+
+    /// <summary>True when the endpoint's call graph produced no detectable
+    /// service / DB / external boundary edge. The UI hides isolated endpoints
+    /// from the canvas (they'd show as misleading floaters) and lists them in
+    /// a side rail under "no service call".</summary>
+    public bool IsIsolated { get; init; }
 }
 
 public enum ServiceMapEdgeKind
