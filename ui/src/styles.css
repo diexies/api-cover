@@ -2210,8 +2210,55 @@ code {
 .form-array-body { flex: 1; }
 
 /* Endpoint palette (sidebar) */
-.palette { display: flex; flex-direction: column; gap: 0.6rem; }
-.palette-controls { display: flex; flex-direction: column; gap: 0.5rem; }
+.palette {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex; flex-direction: column;
+  gap: 0;
+}
+.palette-controls {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  position: sticky; top: 0;
+  background: var(--sidebar-bg, var(--surface-0));
+  padding-bottom: var(--sp-3);
+  z-index: 1;
+  border-bottom: 1px solid var(--hairline);
+}
+.palette-version-filter {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 2px;
+}
+.palette-version-pill {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font: inherit; font-size: var(--fs-xs);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--fg-3);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard);
+}
+.palette-version-pill:hover { color: var(--fg-1); border-color: var(--fg-3); }
+.palette-version-pill.is-active {
+  color: var(--bg, white);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.palette-version-chip {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  border: 1px solid var(--hairline);
+  letter-spacing: 0.02em;
+}
 .palette-filter {
   width: 100%;
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
@@ -2227,7 +2274,14 @@ code {
 }
 .palette-group-toggle button.active { background: var(--bg); color: var(--fg); }
 
-.palette-groups { display: flex; flex-direction: column; gap: 0.6rem; }
+.palette-groups {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0.6rem;
+  padding-top: 0.6rem;
+  scrollbar-width: thin;
+}
 .palette-group { display: flex; flex-direction: column; }
 .palette-group-head {
   display: flex; align-items: center; gap: 0.5rem;

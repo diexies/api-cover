@@ -10,6 +10,27 @@ interface Props {
 
 const METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
+// API version detection: matches `/v1`, `/v23`, `/V2` segments inside a path.
+// Lookahead enforces the segment ends at `/` or end-of-string so `/version1`
+// or `/v1foo` don't match.
+const VERSION_RE = /\/v(\d+)(?=\/|$)/i;
+
+interface ParsedVersion {
+  version: string | null;
+  versionNumber: number;
+  basePath: string;
+}
+
+function parseVersion(path: string): ParsedVersion {
+  const m = path.match(VERSION_RE);
+  if (!m) return { version: null, versionNumber: 0, basePath: path };
+  return {
+    version: `v${m[1]}`,
+    versionNumber: Number(m[1]),
+    basePath: path.replace(VERSION_RE, ''),
+  };
+}
+
 /**
  * Sidebar endpoint palette. Drag-source for drop-onto-canvas. Two grouping modes (HTTP method
  * or logical area), plus a free-text filter that matches method+path+area+purpose.
@@ -19,6 +40,10 @@ export function EndpointPalette({ onError }: Props) {
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [quickCallEp, setQuickCallEp] = useState<EndpointDescriptor | null>(null);
+  // Default to "latest" so a multi-version surface lands clean instead of
+  // dumping every v1/v2/v3 row at once. When no multi-version conflict exists
+  // anywhere this state is effectively ignored.
+  const [versionFilter, setVersionFilter] = useState<string>('latest');
 
   useEffect(() => {
     listEndpoints()
@@ -26,15 +51,56 @@ export function EndpointPalette({ onError }: Props) {
       .catch((e: Error) => onError?.(e.message));
   }, [onError]);
 
-  const filtered = useMemo(() => {
-    if (!filter) return endpoints;
-    const q = filter.toLowerCase();
-    return endpoints.filter((e) =>
-      `${e.method} ${e.path} ${e.area ?? ''} ${e.purpose ?? ''}`.toLowerCase().includes(q)
+  // Pre-compute version metadata: which (method, basePath) pairs have more
+  // than one version (conflictingBases), which versions exist at all, and
+  // the max version per base for the "latest" filter.
+  const versionAnalysis = useMemo(() => {
+    const versionsByBase = new Map<string, Set<string>>();
+    const maxByBase = new Map<string, number>();
+    const allVersions = new Set<string>();
+    for (const ep of endpoints) {
+      const { version, versionNumber, basePath } = parseVersion(ep.path);
+      if (!version) continue;
+      const key = `${ep.method.toUpperCase()} ${basePath}`;
+      allVersions.add(version);
+      if (!versionsByBase.has(key)) versionsByBase.set(key, new Set());
+      versionsByBase.get(key)!.add(version);
+      maxByBase.set(key, Math.max(maxByBase.get(key) ?? 0, versionNumber));
+    }
+    const conflictingBases = new Set<string>();
+    for (const [key, set] of versionsByBase) {
+      if (set.size > 1) conflictingBases.add(key);
+    }
+    const sortedVersions = [...allVersions].sort((a, b) =>
+      Number(b.slice(1)) - Number(a.slice(1)),
     );
-  }, [endpoints, filter]);
+    return { allVersions, sortedVersions, conflictingBases, maxByBase };
+  }, [endpoints]);
 
-  const groups = useMemo(() => groupEndpoints(filtered), [filtered]);
+  const hasMultipleVersions = versionAnalysis.allVersions.size > 1;
+
+  const filtered = useMemo(() => {
+    const q = filter.toLowerCase();
+    return endpoints.filter((e) => {
+      if (q && !`${e.method} ${e.path} ${e.area ?? ''} ${e.purpose ?? ''}`.toLowerCase().includes(q)) {
+        return false;
+      }
+      if (!hasMultipleVersions || versionFilter === 'all') return true;
+      const { version, versionNumber, basePath } = parseVersion(e.path);
+      if (!version) return true;
+      const key = `${e.method.toUpperCase()} ${basePath}`;
+      if (versionFilter === 'latest') {
+        const max = versionAnalysis.maxByBase.get(key) ?? versionNumber;
+        return versionNumber === max;
+      }
+      return version === versionFilter;
+    });
+  }, [endpoints, filter, versionFilter, hasMultipleVersions, versionAnalysis]);
+
+  const groups = useMemo(
+    () => groupEndpoints(filtered, versionAnalysis.conflictingBases, versionFilter),
+    [filtered, versionAnalysis.conflictingBases, versionFilter],
+  );
 
   function toggleGroup(name: string) {
     setCollapsed((prev) => {
@@ -57,6 +123,35 @@ export function EndpointPalette({ onError }: Props) {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
+        {hasMultipleVersions && (
+          <div className="palette-version-filter" role="radiogroup" aria-label="api version filter">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={versionFilter === 'latest'}
+              className={`palette-version-pill${versionFilter === 'latest' ? ' is-active' : ''}`}
+              onClick={() => setVersionFilter('latest')}
+              title="Show only the highest version of each conflicting endpoint"
+            >latest</button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={versionFilter === 'all'}
+              className={`palette-version-pill${versionFilter === 'all' ? ' is-active' : ''}`}
+              onClick={() => setVersionFilter('all')}
+            >all</button>
+            {versionAnalysis.sortedVersions.map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={versionFilter === v}
+                className={`palette-version-pill${versionFilter === v ? ' is-active' : ''}`}
+                onClick={() => setVersionFilter(v)}
+              >{v}</button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="palette-groups">
         {groups.length === 0 && <span className="muted small">no endpoints</span>}
@@ -73,7 +168,7 @@ export function EndpointPalette({ onError }: Props) {
                 {g.subtitle && <span className="palette-group-sub">{g.subtitle}</span>}
                 <span className="palette-group-count">{g.count}</span>
               </div>
-              {open && g.items && renderItems(g.items, setQuickCallEp)}
+              {open && g.items && renderItems(g.items, setQuickCallEp, versionAnalysis.conflictingBases, versionFilter)}
               {open && g.subgroups && (
                 <div className="palette-subgroups">
                   {g.subgroups.map((sg) => {
@@ -90,7 +185,7 @@ export function EndpointPalette({ onError }: Props) {
                           {sg.subtitle && <span className="palette-group-sub">{sg.subtitle}</span>}
                           <span className="palette-group-count">{sg.items.length}</span>
                         </div>
-                        {subOpen && renderItems(sg.items, setQuickCallEp)}
+                        {subOpen && renderItems(sg.items, setQuickCallEp, versionAnalysis.conflictingBases, versionFilter)}
                       </div>
                     );
                   })}
@@ -104,28 +199,46 @@ export function EndpointPalette({ onError }: Props) {
   );
 }
 
-function renderItems(items: EndpointDescriptor[], openQuickCall: (ep: EndpointDescriptor) => void) {
+function renderItems(
+  items: EndpointDescriptor[],
+  openQuickCall: (ep: EndpointDescriptor) => void,
+  conflictingBases: ReadonlySet<string>,
+  versionFilter: string,
+) {
   return (
     <div className="palette-group-items">
-      {items.map((ep) => (
-        <div
-          key={ep.id}
-          className="palette-item"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(ENDPOINT_DRAG_MIME, JSON.stringify(ep));
-            e.dataTransfer.effectAllowed = 'copy';
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            openQuickCall(ep);
-          }}
-          title={`${ep.method} ${ep.path}${ep.area ? ` · ${ep.area}` : ''}${ep.purpose ? ` · ${ep.purpose}` : ''} — right-click for Quick Call`}
-        >
-          <span className={`method-badge method-${ep.method.toLowerCase()}`}>{ep.method}</span>
-          <span className="palette-path">{ep.path}</span>
-        </div>
-      ))}
+      {items.map((ep) => {
+        const { version, basePath } = parseVersion(ep.path);
+        const key = `${ep.method.toUpperCase()} ${basePath}`;
+        // Show the version chip only when (a) the same base path has more than
+        // one version somewhere in the catalogue AND (b) the user is currently
+        // viewing all versions side-by-side. Otherwise the version segment is
+        // redundant noise — the full path stays in the tooltip.
+        const showVersionChip = version !== null && conflictingBases.has(key) && versionFilter === 'all';
+        const displayPath = version !== null && (showVersionChip || versionFilter !== 'all')
+          ? basePath
+          : ep.path;
+        return (
+          <div
+            key={ep.id}
+            className="palette-item"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(ENDPOINT_DRAG_MIME, JSON.stringify(ep));
+              e.dataTransfer.effectAllowed = 'copy';
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              openQuickCall(ep);
+            }}
+            title={`${ep.method} ${ep.path}${ep.area ? ` · ${ep.area}` : ''}${ep.purpose ? ` · ${ep.purpose}` : ''} — right-click for Quick Call`}
+          >
+            <span className={`method-badge method-${ep.method.toLowerCase()}`}>{ep.method}</span>
+            {showVersionChip && <span className="palette-version-chip">{version}</span>}
+            <span className="palette-path">{displayPath}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -147,7 +260,11 @@ interface Subgroup {
   items: EndpointDescriptor[];
 }
 
-function groupEndpoints(endpoints: EndpointDescriptor[]): Group[] {
+function groupEndpoints(
+  endpoints: EndpointDescriptor[],
+  _conflictingBases: ReadonlySet<string>,
+  _versionFilter: string,
+): Group[] {
   // Top-level: HTTP method. Inside each method, sub-grouped by area.
   const byMethod = new Map<string, EndpointDescriptor[]>();
   for (const ep of endpoints) {
@@ -183,7 +300,16 @@ function groupByArea(endpoints: EndpointDescriptor[]): Subgroup[] {
       return {
         name,
         subtitle: purposes.length > 0 ? purposes.join(' · ') : undefined,
-        items: items.sort((a, b) => a.path.localeCompare(b.path)),
+        // Sort by version-stripped path so v1/v2 of the same resource land
+        // adjacent in the list (numerically descending within a base — newest
+        // version first).
+        items: items.sort((a, b) => {
+          const av = parseVersion(a.path);
+          const bv = parseVersion(b.path);
+          const baseCmp = av.basePath.localeCompare(bv.basePath);
+          if (baseCmp !== 0) return baseCmp;
+          return bv.versionNumber - av.versionNumber;
+        }),
       };
     });
 }
