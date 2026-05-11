@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using APICover.Agent.Hosting;
 using APICover.Discovery;
 using APICover.Hosting;
+using APICover.Mcp.Hosting;
 using APICover.UI.Web;
 using Utopia.Sample.WebApi.Services;
 
@@ -26,6 +28,8 @@ builder.Services.AddAPICover(opts =>
     opts.EnableCallGraphInspection = true;
 });
 builder.Services.AddAPICoverWebUI();
+builder.Services.AddAPICoverAgent();
+builder.Services.AddAPICoverMcp();
 
 var app = builder.Build();
 

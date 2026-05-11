@@ -67,6 +67,14 @@ internal static class APICoverEndpoints
             return Results.Json(catalog, Json);
         });
 
+        // Service map — topology view (nodes + edges + metrics + islands).
+        api.MapGet("/service-map", async (IServiceMapService svc, IOptions<APICoverOptions> o) =>
+        {
+            if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
+            var map = await svc.BuildAsync();
+            return Results.Json(map, Json);
+        });
+
         api.MapGet("/discovery/grouped", (IEndpointDiscoveryService disc)
             => Results.Json(DiscoveryGrouping.Group(disc.GetEndpoints()), Json));
 
@@ -144,6 +152,40 @@ internal static class APICoverEndpoints
 
         api.MapGet("/runs", async (string? scenarioId, IRunStore store)
             => Results.Json(await store.ListAsync(scenarioId), Json));
+
+        // Recent commit history with scenario-coverage tagging. The home dashboard
+        // renders this as a horizontal timeline so the user can see, at a glance,
+        // which commits arrived after the last scenario update — i.e. what code
+        // has shipped since we last produced or refreshed flows for it.
+        api.MapGet("/git/log", async (int? take, IScenarioStore store, Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var n = Math.Clamp(take ?? 25, 1, 100);
+            var commits = GitLog.Read(env.ContentRootPath, n);
+            DateTimeOffset? lastScenario = null;
+            foreach (var s in await store.ListAsync())
+            {
+                if (lastScenario is null || s.UpdatedAt > lastScenario) lastScenario = s.UpdatedAt;
+            }
+            var result = commits.Select(c => new
+            {
+                sha = c.Sha,
+                shortSha = c.Sha.Length >= 7 ? c.Sha[..7] : c.Sha,
+                subject = c.Subject,
+                author = c.Author,
+                date = c.Date,
+                traced = lastScenario.HasValue && c.Date <= lastScenario.Value,
+            }).ToArray();
+            return Results.Json(new { commits = result, lastScenarioUpdate = lastScenario }, Json);
+        });
+
+        // Per-commit detail — files changed + per-file numstat + unified patch. Used
+        // by the home timeline's expanded view so the user can see what changed in a
+        // commit without dropping to the terminal.
+        api.MapGet("/git/commit/{sha}", (string sha, Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var detail = GitLog.ReadCommit(env.ContentRootPath, sha);
+            return detail is null ? Results.NotFound() : Results.Json(detail, Json);
+        });
 
         api.MapGet("/runs/{id}", async (string id, IRunStore store) =>
         {

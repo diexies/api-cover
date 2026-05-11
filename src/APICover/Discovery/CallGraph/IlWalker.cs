@@ -435,6 +435,24 @@ internal sealed class IlWalker
                         or "Remove" or "RemoveRange";
                 }
             }
+            // EF DbSet<T>. Catches direct DbSet calls in minimal-API handlers that
+            // skip a service layer (e.g. `db.Invoices.FindAsync(id)`). Match by
+            // open-generic full name since closed generics produce a string with
+            // the type argument suffix.
+            for (var t = declaring; t is not null; t = t.BaseType)
+            {
+                var fn = t.IsGenericType ? t.GetGenericTypeDefinition().FullName : t.FullName;
+                if (fn == "Microsoft.EntityFrameworkCore.DbSet`1" || fn == "Microsoft.EntityFrameworkCore.IDbSet`1")
+                {
+                    return name is "Find" or "FindAsync"
+                        or "Add" or "AddAsync" or "AddRange" or "AddRangeAsync"
+                        or "Update" or "UpdateRange"
+                        or "Remove" or "RemoveRange"
+                        or "Attach" or "AttachRange"
+                        or "ExecuteDelete" or "ExecuteDeleteAsync"
+                        or "ExecuteUpdate" or "ExecuteUpdateAsync";
+                }
+            }
             // EF queryable extension methods (terminal operators).
             if (declaring.FullName is "Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions")
             {

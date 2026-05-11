@@ -18,10 +18,12 @@ interface Props {
   dimmed?: InspectorTab[];
   /** Tabs that should not render at all (feature off / N/A). */
   hidden?: InspectorTab[];
+  /** Tabs whose current content has a validation/parse error — show a red marker. */
+  errored?: InspectorTab[];
   onChange: (tab: InspectorTab) => void;
 }
 
-export function TabBar({ active, counts, dimmed = [], hidden = [], onChange }: Props) {
+export function TabBar({ active, counts, dimmed = [], hidden = [], errored = [], onChange }: Props) {
   const visible = TABS.filter((t) => !hidden.includes(t));
   return (
     <nav className="term-tabs" role="tablist" aria-label="Inspector sections">
@@ -29,16 +31,20 @@ export function TabBar({ active, counts, dimmed = [], hidden = [], onChange }: P
         const isActive = t === active;
         const count = counts[t];
         const isDim = dimmed.includes(t);
+        const hasError = errored.includes(t);
         return (
           <button
             key={t}
             role="tab"
             aria-selected={isActive}
-            className={`term-tab term-tab-${t} ${isActive ? 'active' : ''} ${isDim ? 'dim' : ''}`}
+            className={`term-tab term-tab-${t} ${isActive ? 'active' : ''} ${isDim ? 'dim' : ''} ${hasError ? 'has-error' : ''}`}
             onClick={() => onChange(t)}
           >
             <span className="term-tab-bracket">[</span>
             <span className="term-tab-label">{TAB_LABELS[t]}</span>
+            {hasError && (
+              <span className="term-tab-error-dot" aria-label="invalid input" title="invalid input on this tab" />
+            )}
             {count != null && count > 0 && (
               <sup className="term-tab-count">{count}</sup>
             )}

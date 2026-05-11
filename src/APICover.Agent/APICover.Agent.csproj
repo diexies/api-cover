@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Embedded Claude agent for APICover. Reads live discovery + call-graph data, generates scenario suggestions. Opt-in via AddAPICoverAgent().</Description>
+    <PackageId>APICover.Agent</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\APICover\APICover.csproj" />
+    <ProjectReference Include="..\APICover.Abstractions\APICover.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="APICover.Agent.Tests" />
+    <InternalsVisibleTo Include="APICover.Agent.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\INTRODUCE.md" />
+  </ItemGroup>
+
+</Project>

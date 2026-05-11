@@ -1,6 +1,10 @@
 bin/
 obj/
 out/
+
+# Sample app runtime artifacts (agent memory + sessions populated by tests)
+samples/Utopia.Sample.WebApi/docs/
+
 *.user
 *.suo
 .vs/
@@ -26,6 +30,10 @@ Thumbs.db
 *.pem
 *.key
 secrets.json
+
+# Claude Code / agent tooling — contains local paths and developer-specific
+# settings that don't belong in the public repo.
+.claude/
 
 # TypeScript
 *.tsbuildinfo

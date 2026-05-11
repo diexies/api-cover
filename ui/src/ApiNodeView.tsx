@@ -38,6 +38,18 @@ const statusClass: Record<NodeStatus, string> = {
   cancelled: 'node-cancelled',
 };
 
+// Icon + label for each status. Pairs with the border colour so the signal isn't
+// colour-only — meets accessibility floor for colourblind users.
+const statusBadge: Record<NodeStatus, { icon: string; label: string } | null> = {
+  pending:   null,
+  running:   { icon: '⏵', label: 'running' },
+  succeeded: { icon: '✓', label: 'succeeded' },
+  failed:    { icon: '✗', label: 'failed' },
+  skipped:   { icon: '⊘', label: 'skipped' },
+  paused:    { icon: '⏸', label: 'paused' },
+  cancelled: { icon: '⊘', label: 'cancelled' },
+};
+
 const methodClass: Record<string, string> = {
   GET: 'method-get',
   POST: 'method-post',
@@ -62,6 +74,9 @@ export function ApiNodeView({ data }: NodeProps & { data: ApiNodeData }) {
   const cls = data.isStart ? `${baseCls} is-start` : baseCls;
   const variantCount = data.caseVariantCount ?? 0;
   const anchorTint = data.caseAnchorColor ?? '#a855f7';
+  // Suppress the status pill in idle/editing mode — the badge is run-time signal,
+  // not editor decoration.
+  const badge = data.idle ? null : statusBadge[data.status];
   return (
     <div className={cls}>
       {data.isStart && <span className="start-flag" title="start node — kicks off the scenario">▶ start</span>}
@@ -87,6 +102,17 @@ export function ApiNodeView({ data }: NodeProps & { data: ApiNodeData }) {
       <div className="api-node-row">
         <span className={`method-badge ${methodClass[data.method] ?? ''}`}>{data.method}</span>
         <span className="path">{data.path}</span>
+        {badge && (
+          <span
+            className={`node-status-pill node-status-${data.status}`}
+            role="status"
+            aria-label={badge.label}
+            title={badge.label}
+          >
+            <span aria-hidden="true">{badge.icon}</span>
+            <span className="node-status-text">{badge.label}</span>
+          </span>
+        )}
         {(data.groupCount ?? 0) > 1 && (
           <span
             className="overlap-badge"
