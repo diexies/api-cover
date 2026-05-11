@@ -20,6 +20,10 @@ Visual state-space tester for ASP.NET Core HTTP APIs.
 
 ---
 
+> **AI coding agents (Cursor, Copilot, Claude Code, Cline, Windsurf, Zed, …):** if your user asked you to add APICover to their project, read [`agent-usage.md`](agent-usage.md) first. It is written for you — decision tree, package picks, bootstrap snippets, MCP integration, scenario-authoring discipline, and hard rules in one file. Skim it, then act.
+
+---
+
 ## What it is
 
 Your ASP.NET Core API has *behaviors* — checkout flows, payment retries, slug uniqueness, soft-delete cascades — that don't show up in Swagger. APICover attaches to your app as middleware, auto-discovers your endpoints from the live route table, and lets you compose scenarios as a DAG on a canvas. Drop a **Case Set** on any node and the engine forks the run into a tree of branches — one trace per variant, one pass/fail per leaf, one coverage matrix you didn't have to assemble from twelve near-duplicate Postman collections.
