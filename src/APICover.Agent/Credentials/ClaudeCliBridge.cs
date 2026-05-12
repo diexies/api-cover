@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using APICover.Agent.Anthropic;
@@ -24,12 +26,14 @@ internal sealed class ClaudeCliBridge : IAnthropicClient
     private readonly IClaudeCredentialProvider _credentials;
     private readonly IOptions<AgentOptions> _options;
     private readonly IHostEnvironment _env;
+    private readonly IServer _server;
 
-    public ClaudeCliBridge(IClaudeCredentialProvider credentials, IOptions<AgentOptions> options, IHostEnvironment env)
+    public ClaudeCliBridge(IClaudeCredentialProvider credentials, IOptions<AgentOptions> options, IHostEnvironment env, IServer server)
     {
         _credentials = credentials;
         _options = options;
         _env = env;
+        _server = server;
     }
 
     public async Task<MessageResponse> SendAsync(MessageRequest request, CancellationToken cancellationToken)
@@ -63,11 +67,27 @@ internal sealed class ClaudeCliBridge : IAnthropicClient
         psi.ArgumentList.Add("--print");
         psi.ArgumentList.Add("--output-format");
         psi.ArgumentList.Add("json");
+
+        // MCP self-loopback: feed the CLI the in-process APICover MCP server so it can
+        // call scenarios.save, endpoints.list, etc. Wired only when the run wants tools
+        // AND we know our own listening URL. Falls back silently to "tools disabled" if
+        // the server addresses feature is not yet populated (very early startup).
+        string? mcpConfigPath = null;
+        var mcpUrl = TryResolveMcpUrl();
+        if (wantsTools && mcpUrl is not null)
+        {
+            mcpConfigPath = WriteMcpConfig(mcpUrl);
+            psi.ArgumentList.Add("--mcp-config");
+            psi.ArgumentList.Add(mcpConfigPath);
+            psi.ArgumentList.Add("--strict-mcp-config");
+        }
+
         if (wantsTools)
         {
             // Allow the CLI's built-in tools so it can actually do scan / scenario
             // work. acceptEdits skips the per-edit confirmation (we trust the agent
-            // since it's running in a known workspace dir).
+            // since it's running in a known workspace dir). When MCP is wired, also
+            // allow every mcp__apicover__* tool by wildcard.
             psi.ArgumentList.Add("--allowed-tools");
             psi.ArgumentList.Add("Read");
             psi.ArgumentList.Add("Write");
@@ -75,6 +95,10 @@ internal sealed class ClaudeCliBridge : IAnthropicClient
             psi.ArgumentList.Add("Glob");
             psi.ArgumentList.Add("Grep");
             psi.ArgumentList.Add("Bash");
+            if (mcpConfigPath is not null)
+            {
+                psi.ArgumentList.Add("mcp__apicover");
+            }
             psi.ArgumentList.Add("--permission-mode");
             psi.ArgumentList.Add("acceptEdits");
             psi.ArgumentList.Add("--add-dir");
@@ -109,7 +133,41 @@ internal sealed class ClaudeCliBridge : IAnthropicClient
         }
 
         var stdout = await proc.StandardOutput.ReadToEndAsync(cancellationToken);
+
+        if (mcpConfigPath is not null)
+        {
+            try { File.Delete(mcpConfigPath); } catch { /* best effort */ }
+        }
+
         return ParseCliJson(stdout);
+    }
+
+    private string? TryResolveMcpUrl()
+    {
+        var addresses = _server.Features.Get<IServerAddressesFeature>()?.Addresses;
+        if (addresses is null || addresses.Count == 0) return null;
+        // Prefer http over https (CLI runs locally, self-signed cert noise). Take the first
+        // bindable address; replace 0.0.0.0/[::]/+ with 127.0.0.1 so the subprocess can dial.
+        var raw = addresses.FirstOrDefault(a => a.StartsWith("http://"))
+            ?? addresses.First();
+        var url = raw.Replace("://0.0.0.0", "://127.0.0.1")
+                     .Replace("://[::]", "://127.0.0.1")
+                     .Replace("://+", "://127.0.0.1");
+        return url.TrimEnd('/') + "/apicover/mcp";
+    }
+
+    private static string WriteMcpConfig(string mcpUrl)
+    {
+        var payload = new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["apicover"] = new { type = "http", url = mcpUrl }
+            }
+        };
+        var path = Path.Combine(Path.GetTempPath(), $"apicover-mcp-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(payload));
+        return path;
     }
 
     private static string BuildPromptText(MessageRequest request)

@@ -25,7 +25,9 @@ import { autoLayout } from './layout';
 import { wouldCreateCycle } from './dag';
 import { normalisePath } from './App';
 import { useResizableWidth } from './useResizableWidth';
+import { useVisibilityTicker } from './hooks/useVisibilityTicker';
 import { FlowHeader } from './FlowHeader';
+import { RunHistoryPanel } from './RunHistoryPanel';
 import { BranchDiagram } from './inspector/BranchDiagram';
 import { QuickCallPanel } from './QuickCallPanel';
 import {
@@ -88,11 +90,14 @@ export function ScenarioCanvas(props: Props) {
 function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint, endpointStatsByKey, auth, enableCallGraph, onSaved }: Props) {
   const [run, setRun] = useState<Run | null>(null);
   const [running, setRunning] = useState(false);
+  // Bumped whenever a run reaches a terminal state so the RunHistoryPanel refetches
+  // its disk-persisted list to include the just-finished run.
+  const [historyTick, setHistoryTick] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [nowTick, setNowTick] = useState(0);
+  const nowTick = useVisibilityTicker(lastSavedAt != null);
   const unsubRef = useRef<(() => void) | null>(null);
   const onSaveRef = useRef<() => Promise<void>>(async () => {});
   const dirtyRef = useRef(false);
@@ -712,11 +717,55 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       let ep: EndpointDescriptor;
       try { ep = JSON.parse(raw); } catch { return; }
 
-      // RF treats node.position as top-left. Shift by half the assumed size so the cursor
-      // lands on the node's centre — keeps drop-into-tight-areas membership working.
       const drop = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const position = { x: drop.x - NEW_NODE_W / 2, y: drop.y - NEW_NODE_H / 2 };
       const id = nextNodeId(nodes, ep.method, ep.path);
+
+      // Edge auto-create: if the drop point lands on an existing node, decide which side
+      // (top/right/bottom/left) the cursor is closest to. Place the new node just outside
+      // that side and wire an edge in the matching direction:
+      //   - drop on RIGHT  side → new node to the right,  edge existing → new
+      //   - drop on LEFT   side → new node to the left,   edge new → existing
+      //   - drop on BOTTOM side → new node below,         edge existing → new
+      //   - drop on TOP    side → new node above,         edge new → existing
+      const GAP = 60;
+      let position = { x: drop.x - NEW_NODE_W / 2, y: drop.y - NEW_NODE_H / 2 };
+      let edgeToAdd: { source: string; target: string } | null = null;
+
+      const overNode = nodes.find((n) => {
+        const w = n.measured?.width ?? NEW_NODE_W;
+        const h = n.measured?.height ?? NEW_NODE_H;
+        return drop.x >= n.position.x && drop.x <= n.position.x + w
+          && drop.y >= n.position.y && drop.y <= n.position.y + h;
+      });
+
+      if (overNode) {
+        const w = overNode.measured?.width ?? NEW_NODE_W;
+        const h = overNode.measured?.height ?? NEW_NODE_H;
+        const cx = overNode.position.x + w / 2;
+        const cy = overNode.position.y + h / 2;
+        const dx = drop.x - cx;
+        const dy = drop.y - cy;
+        // Normalise to the node's aspect so a 220×80 box still picks the correct side.
+        const nx = dx / (w / 2);
+        const ny = dy / (h / 2);
+        if (Math.abs(nx) >= Math.abs(ny)) {
+          if (nx >= 0) {
+            position = { x: overNode.position.x + w + GAP, y: overNode.position.y };
+            edgeToAdd = { source: overNode.id, target: id };
+          } else {
+            position = { x: overNode.position.x - NEW_NODE_W - GAP, y: overNode.position.y };
+            edgeToAdd = { source: id, target: overNode.id };
+          }
+        } else {
+          if (ny >= 0) {
+            position = { x: overNode.position.x, y: overNode.position.y + h + GAP };
+            edgeToAdd = { source: overNode.id, target: id };
+          } else {
+            position = { x: overNode.position.x, y: overNode.position.y - NEW_NODE_H - GAP };
+            edgeToAdd = { source: id, target: overNode.id };
+          }
+        }
+      }
 
       // Seed the new ApiNode with declared params + first body sample/example.
       const seeded = seedFromEndpoint(id, ep);
@@ -732,10 +781,22 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           },
         },
       ]);
+
+      if (edgeToAdd) {
+        setEdges((cur) => {
+          if (cur.some((x) => x.source === edgeToAdd!.source && x.target === edgeToAdd!.target)) return cur;
+          if (wouldCreateCycle(cur, edgeToAdd!.source, edgeToAdd!.target)) return cur;
+          return addEdge(
+            { ...edgeToAdd!, id: `e-${Date.now()}-${edgeToAdd!.source}-${edgeToAdd!.target}` },
+            cur,
+          );
+        });
+      }
+
       setDirty(true);
       setSelectedNodeId(id);
     },
-    [nodes, screenToFlowPosition, setNodes]
+    [nodes, screenToFlowPosition, setNodes, setEdges]
   );
 
   function deleteNode(nodeId: string) {
@@ -920,27 +981,6 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       apiNodes, breakpoints, startNodeIds, groups, caseSets,
       flowName, flowDescription, flowTags, nodes, edges]);
 
-  // 1s tick drives the "Saved · Ns ago" relative timestamp; pauses when the
-  // tab is hidden so we aren't re-rendering off-screen.
-  useEffect(() => {
-    if (lastSavedAt == null) return;
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (interval) return;
-      interval = setInterval(() => setNowTick((n) => n + 1), 1000);
-    };
-    const stop = () => {
-      if (interval) { clearInterval(interval); interval = null; }
-    };
-    const onVis = () => (document.visibilityState === 'hidden' ? stop() : start());
-    start();
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      stop();
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, [lastSavedAt]);
-
   function onAutoLayout() {
     setNodes((cur) => autoLayout(cur, edges));
     setDirty(true);
@@ -977,6 +1017,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       setRun(snapshot);
       if (snapshot.status === 'succeeded' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
         setRunning(false);
+        setHistoryTick((t) => t + 1);
       }
       return;
     }
@@ -984,6 +1025,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     if (evt.type === 'runFinished') {
       setRun(evt.payload as Run); setRunning(false);
       unsubRef.current?.(); unsubRef.current = null;
+      setHistoryTick((t) => t + 1);
       return;
     }
     const result = evt.payload as NodeResult | undefined;
@@ -1291,6 +1333,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           setSelectedNodeId(id);
         }}
       />
+      <RunHistoryPanel scenarioId={scenario.id} refreshTick={historyTick} />
       <div className="canvas-row">
         <div
           className="canvas-flow"

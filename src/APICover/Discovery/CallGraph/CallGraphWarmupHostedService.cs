@@ -16,16 +16,19 @@ namespace APICover.Discovery.CallGraph;
 internal sealed class CallGraphWarmupHostedService : IHostedService
 {
     private readonly ICallGraphService _service;
+    private readonly IReverseCallIndexService _reverseIndex;
     private readonly IOptions<APICoverOptions> _options;
     private readonly ILogger<CallGraphWarmupHostedService> _logger;
     private CancellationTokenSource? _cts;
 
     public CallGraphWarmupHostedService(
         ICallGraphService service,
+        IReverseCallIndexService reverseIndex,
         IOptions<APICoverOptions> options,
         ILogger<CallGraphWarmupHostedService> logger)
     {
         _service = service;
+        _reverseIndex = reverseIndex;
         _options = options;
         _logger = logger;
     }
@@ -51,6 +54,12 @@ internal sealed class CallGraphWarmupHostedService : IHostedService
                 var built = await _service.RebuildAllAsync(ct).ConfigureAwait(false);
                 _logger.LogInformation("APICover call-graph warmup built {Count} graph(s) in {Elapsed}.",
                     built.Count, DateTimeOffset.UtcNow - t);
+                // Reverse fan-in index — answers "where is this service used?" without
+                // re-walking call graphs on every UI request. Single pass over the cache.
+                var revStart = DateTimeOffset.UtcNow;
+                await _reverseIndex.RebuildAsync(ct).ConfigureAwait(false);
+                _logger.LogInformation("APICover reverse-call index built in {Elapsed}.",
+                    DateTimeOffset.UtcNow - revStart);
             }
             catch (OperationCanceledException)
             {

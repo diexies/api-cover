@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { listEndpoints, type EndpointDescriptor } from './api';
 import { QuickCallPanel } from './QuickCallPanel';
+import { useI18n } from './i18n';
 
 export const ENDPOINT_DRAG_MIME = 'application/x-utopia-endpoint';
 
@@ -9,12 +11,15 @@ interface Props {
 }
 
 const METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+const VIRTUALIZE_THRESHOLD = 20;
+const ITEM_HEIGHT = 28;
 
 /**
  * Sidebar endpoint palette. Drag-source for drop-onto-canvas. Two grouping modes (HTTP method
  * or logical area), plus a free-text filter that matches method+path+area+purpose.
  */
 export function EndpointPalette({ onError }: Props) {
+  const { t } = useI18n();
   const [endpoints, setEndpoints] = useState<EndpointDescriptor[]>([]);
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -53,13 +58,15 @@ export function EndpointPalette({ onError }: Props) {
       <div className="palette-controls">
         <input
           className="palette-filter"
-          placeholder="search endpoints…"
+          placeholder={t('palette.search')}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          aria-label={t('palette.filter.aria')}
         />
+        <span className="palette-count muted small" aria-live="polite">{filtered.length}</span>
       </div>
       <div className="palette-groups">
-        {groups.length === 0 && <span className="muted small">no endpoints</span>}
+        {groups.length === 0 && <span className="muted small">{t('palette.empty')}</span>}
         {groups.map((g) => {
           const open = !collapsed.has(g.name);
           return (
@@ -67,13 +74,16 @@ export function EndpointPalette({ onError }: Props) {
               <div
                 className={`palette-group-head ${open ? 'open' : ''}`}
                 onClick={() => toggleGroup(g.name)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(g.name); } }}
               >
                 <span className="caret">{open ? '▾' : '▸'}</span>
                 <span className={`method-badge method-${g.name.toLowerCase()}`}>{g.name}</span>
                 {g.subtitle && <span className="palette-group-sub">{g.subtitle}</span>}
                 <span className="palette-group-count">{g.count}</span>
               </div>
-              {open && g.items && renderItems(g.items, setQuickCallEp)}
+              {open && g.items && <RenderItems items={g.items} openQuickCall={setQuickCallEp} />}
               {open && g.subgroups && (
                 <div className="palette-subgroups">
                   {g.subgroups.map((sg) => {
@@ -84,13 +94,16 @@ export function EndpointPalette({ onError }: Props) {
                         <div
                           className={`palette-subgroup-head ${subOpen ? 'open' : ''}`}
                           onClick={() => toggleGroup(subKey)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(subKey); } }}
                         >
                           <span className="caret">{subOpen ? '▾' : '▸'}</span>
                           <span className="palette-subgroup-name">{sg.name}</span>
                           {sg.subtitle && <span className="palette-group-sub">{sg.subtitle}</span>}
                           <span className="palette-group-count">{sg.items.length}</span>
                         </div>
-                        {subOpen && renderItems(sg.items, setQuickCallEp)}
+                        {subOpen && <RenderItems items={sg.items} openQuickCall={setQuickCallEp} />}
                       </div>
                     );
                   })}
@@ -104,28 +117,74 @@ export function EndpointPalette({ onError }: Props) {
   );
 }
 
-function renderItems(items: EndpointDescriptor[], openQuickCall: (ep: EndpointDescriptor) => void) {
+function RenderItems({ items, openQuickCall }: { items: EndpointDescriptor[]; openQuickCall: (ep: EndpointDescriptor) => void }) {
+  if (items.length < VIRTUALIZE_THRESHOLD) {
+    return (
+      <div className="palette-group-items">
+        {items.map((ep) => (
+          <EndpointItem key={ep.id} ep={ep} openQuickCall={openQuickCall} />
+        ))}
+      </div>
+    );
+  }
+  return <VirtualEndpointList items={items} openQuickCall={openQuickCall} />;
+}
+
+function VirtualEndpointList({ items, openQuickCall }: { items: EndpointDescriptor[]; openQuickCall: (ep: EndpointDescriptor) => void }) {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ITEM_HEIGHT,
+    overscan: 8,
+  });
+  const maxHeight = Math.min(items.length * ITEM_HEIGHT, ITEM_HEIGHT * 14);
   return (
-    <div className="palette-group-items">
-      {items.map((ep) => (
-        <div
-          key={ep.id}
-          className="palette-item"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(ENDPOINT_DRAG_MIME, JSON.stringify(ep));
-            e.dataTransfer.effectAllowed = 'copy';
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            openQuickCall(ep);
-          }}
-          title={`${ep.method} ${ep.path}${ep.area ? ` · ${ep.area}` : ''}${ep.purpose ? ` · ${ep.purpose}` : ''} — right-click for Quick Call`}
-        >
-          <span className={`method-badge method-${ep.method.toLowerCase()}`}>{ep.method}</span>
-          <span className="palette-path">{ep.path}</span>
-        </div>
-      ))}
+    <div
+      ref={parentRef}
+      className="palette-group-items palette-group-items-virtual"
+      style={{ maxHeight, overflowY: 'auto' }}
+    >
+      <div style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((row) => {
+          const ep = items[row.index];
+          return (
+            <div
+              key={ep.id}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${row.start}px)`,
+              }}
+            >
+              <EndpointItem ep={ep} openQuickCall={openQuickCall} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EndpointItem({ ep, openQuickCall }: { ep: EndpointDescriptor; openQuickCall: (ep: EndpointDescriptor) => void }) {
+  return (
+    <div
+      className="palette-item"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(ENDPOINT_DRAG_MIME, JSON.stringify(ep));
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openQuickCall(ep);
+      }}
+      title={`${ep.method} ${ep.path}${ep.area ? ` · ${ep.area}` : ''}${ep.purpose ? ` · ${ep.purpose}` : ''} — right-click for Quick Call`}
+    >
+      <span className={`method-badge method-${ep.method.toLowerCase()}`}>{ep.method}</span>
+      <span className="palette-path">{ep.path}</span>
     </div>
   );
 }

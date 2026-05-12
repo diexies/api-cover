@@ -38,8 +38,10 @@ public sealed class AgentOptions
     /// <summary>Anthropic API version header sent on every request.</summary>
     public string AnthropicVersion { get; set; } = "2023-06-01";
 
-    /// <summary>Seconds before a single Anthropic request is cancelled.</summary>
-    public int RequestTimeoutSeconds { get; set; } = 120;
+    /// <summary>Seconds before a single Anthropic request is cancelled. Note: in Max mode
+    /// this also caps the CLI subprocess lifetime — scenario inference + tool loops can
+    /// easily exceed 2 minutes on large APIs.</summary>
+    public int RequestTimeoutSeconds { get; set; } = 600;
 
     /// <summary>
     /// Filesystem root the agent's persistent memory lives under. Resolved at boot:

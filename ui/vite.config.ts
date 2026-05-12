@@ -14,6 +14,16 @@ export default defineConfig({
     sourcemap: false,
     target: 'es2020',
     assetsDir: 'assets',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          xyflow: ['@xyflow/react'],
+          virtual: ['@tanstack/react-virtual'],
+          layout: ['dagre'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

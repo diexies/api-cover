@@ -123,7 +123,7 @@ export function AgentSettingsTab({ status, onChanged }: Props) {
             ? <>Detected <code>claude</code> CLI{status.maxVersion ? <> ({status.maxVersion})</> : null}. The agent will spawn it as a child process and use your Max quota.</>
             : <>The <code>claude</code> CLI is not on the server's PATH. Install Claude Code on the host running APICover, or switch to API-key mode.</>}
           <div className="gs-callout-sub">
-            Max mode does not support tool calls in M1 — for richer "scan project" runs, use API-key mode.
+            Tool calls work through MCP self-loopback — scenario discovery and persistence run via the APICover MCP server, no API key required.
           </div>
         </div>
       )}

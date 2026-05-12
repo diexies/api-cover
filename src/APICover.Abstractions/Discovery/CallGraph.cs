@@ -63,13 +63,52 @@ public sealed class CallNode
     /// <summary>Source line (only when a portable PDB is available beside the assembly).</summary>
     public int? LineNumber { get; init; }
 
+    /// <summary>Last source line of the method body — pairs with <see cref="LineNumber"/> so
+    /// the UI can scroll-to and highlight the exact method range in the source viewer.</summary>
+    public int? EndLine { get; init; }
+
     /// <summary>Free-form description sourced from <see cref="ExploreSummaryAttribute"/> on
     /// the method (preferred) or its declaring type. Surfaces in the UI under the call name
     /// so a reader sees "what this does" without opening the source.</summary>
     public string? Summary { get; init; }
 
+    /// <summary>IL-level signals extracted from the method body: exception throws, log/string
+    /// literals, branch counts. Surfaces decision points and intent hints in the UI without
+    /// forcing the user to open source code. Null when the walker couldn't read IL.</summary>
+    public IReadOnlyList<CallSignal>? Signals { get; init; }
+
+    /// <summary>First 6–8 source lines of the method body, pulled via PDB sequence points.
+    /// Lines joined with `\n`, common leading whitespace stripped, long lines truncated.
+    /// Null when no portable PDB is available, the file is missing, or the slice is empty.
+    /// The UI renders this directly under the node so the user reads real C# instead of
+    /// guessing what a service does from its name.</summary>
+    public string? BodySnippet { get; init; }
+
     /// <summary>Children — invoked methods, recursively. Empty for leaf nodes (boundaries, cycle, etc.).</summary>
     public IReadOnlyList<CallNode> Calls { get; init; } = Array.Empty<CallNode>();
+}
+
+/// <summary>A single piece of IL-derived intent context attached to a method node.</summary>
+public sealed class CallSignal
+{
+    /// <summary>Signal classification.</summary>
+    public required CallSignalKind Kind { get; init; }
+
+    /// <summary>Human-readable text — exception type, log message literal, branch count, etc.</summary>
+    public required string Text { get; init; }
+}
+
+/// <summary>What kind of IL signal we captured.</summary>
+public enum CallSignalKind
+{
+    /// <summary>Method throws an exception type (e.g. NotFoundException, ArgumentException).</summary>
+    Throws = 0,
+    /// <summary>String literal passed to a logger / message channel — first-arg ldstr.</summary>
+    LogMessage = 1,
+    /// <summary>Conditional branch count (brfalse/brtrue/switch) — rough complexity signal.</summary>
+    Branches = 2,
+    /// <summary>String literal we couldn't classify (validation message, etc.).</summary>
+    Literal = 3,
 }
 
 /// <summary>How the walker classified a given call. Drives both the UI badge and whether

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScenarioCanvas } from './ScenarioCanvas';
 import { ScenarioList } from './ScenarioList';
 import { ServiceCatalogPanel } from './ServiceCatalogPanel';
@@ -56,10 +56,37 @@ export function App() {
   // on mount via initialPrompt + autoStart, then onPromptConsumed clears it.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null);
   const [pendingAgentMode, setPendingAgentMode] = useState<string | null>(null);
+  // Snapshot of scenario ids taken when a scenario-generation run starts, so we can
+  // detect the newly-created scenario after the run completes and auto-select it.
+  const knownScenarioIdsRef = useRef<Set<string>>(new Set());
 
   function openAgentWithPrompt(text: string, mode?: string | null) {
+    if (mode === 'scenario') {
+      knownScenarioIdsRef.current = new Set(scenarios.map((s) => s.id));
+    }
     setPendingAgentPrompt(text);
     setPendingAgentMode(mode ?? null);
+  }
+
+  async function handleAgentRunCompleted(modeLabel: string | null) {
+    if (modeLabel !== 'scenario' && modeLabel !== 'discover') return;
+    if (modeLabel === 'discover') {
+      try { localStorage.removeItem('apicover.idleDiscoverInflight'); } catch { /* quota */ }
+    }
+    try {
+      const list = await listScenarios();
+      setScenarios(list);
+      const newOne = list.find((s) => !knownScenarioIdsRef.current.has(s.id));
+      if (newOne) {
+        setSelectedId(newOne.id);
+        setSidebar('scenarios');
+      }
+      if (modeLabel === 'discover' && list.length > 0) {
+        try { localStorage.setItem('apicover.idleDiscoverDismissed.v2', '1'); } catch { /* quota */ }
+      }
+    } catch {
+      /* surface via existing error state on next reload; non-fatal */
+    }
   }
 
   // Open the global settings modal, optionally pinning a specific tab. The
@@ -89,6 +116,41 @@ export function App() {
     listRuns().then(setRuns).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Idle-scan auto-discover: when the workspace is empty and the agent is ready,
+  // fire one ScenarioInfer run so Claude inspects the API surface and seeds
+  // scenarios without user input. Dismissed-once flag in localStorage prevents
+  // re-firing across reloads (user can clear via /discover chip manually).
+  const didIdleDiscoverRef = useRef(false);
+  useEffect(() => {
+    if (didIdleDiscoverRef.current) return;
+    if (!onHome) return;
+    if (scenarios.length > 0) return;
+    if (!agentStatus) return;
+    const ready = agentStatus.mode !== 'Disabled' && (agentStatus.mode === 'Max' || agentStatus.hasApiKey);
+    if (!ready) return;
+    let dismissed = false;
+    let inflight = false;
+    try {
+      dismissed = localStorage.getItem('apicover.idleDiscoverDismissed.v2') === '1';
+      // In-flight semaphore — survives reload during a long-running idle discover so
+      // refreshing the page doesn't fire a second concurrent run. Stale entries older
+      // than 15 minutes are ignored (assumes the previous run died without cleanup).
+      const flightRaw = localStorage.getItem('apicover.idleDiscoverInflight');
+      if (flightRaw) {
+        const ts = Number(flightRaw);
+        if (Number.isFinite(ts) && Date.now() - ts < 15 * 60_000) inflight = true;
+      }
+    } catch { /* quota */ }
+    if (dismissed || inflight) return;
+    didIdleDiscoverRef.current = true;
+    knownScenarioIdsRef.current = new Set();
+    try { localStorage.setItem('apicover.idleDiscoverInflight', String(Date.now())); } catch { /* quota */ }
+    openAgentWithPrompt('Inspect this API and propose likely scenarios.', 'discover');
+    // Persist dismiss only after run completes (in handleAgentRunCompleted), not now —
+    // otherwise a failed/cancelled run leaves the user with no scenarios and no re-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentStatus, scenarios.length, onHome]);
 
   useEffect(() => {
     writeLastScenarioId(selectedId);
@@ -396,6 +458,7 @@ export function App() {
             autoStart={pendingAgentPrompt !== null}
             onPromptConsumed={() => { setPendingAgentPrompt(null); setPendingAgentMode(null); }}
             onStatusChanged={setAgentStatus}
+            onRunCompleted={handleAgentRunCompleted}
           />
         )}
       </div>

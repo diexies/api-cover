@@ -13,6 +13,7 @@ using APICover.Abstractions.Models;
 using APICover.Abstractions.Services;
 using APICover.Discovery;
 using APICover.Engine;
+using APICover.Storage;
 
 namespace APICover.Endpoints;
 
@@ -41,6 +42,50 @@ internal static class APICoverEndpoints
         api.MapGet("/options", (IOptions<APICoverOptions> o)
             => Results.Json(new { enableCallGraph = o.Value.EnableCallGraphInspection }, Json));
 
+        // Source file slice. UI right-click → "View source" → drawer with file contents
+        // around the given line. Locked under the host environment's ContentRootPath to
+        // block path traversal. Only used when the user has explicitly clicked a node
+        // that already exposes a filePath from PDB-resolved IL walks.
+        api.MapGet("/source", (string path, int? line, int? endLine, int? context, Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            if (string.IsNullOrWhiteSpace(path)) return Results.BadRequest(new { error = "path required" });
+            string full;
+            try { full = System.IO.Path.GetFullPath(path); }
+            catch { return Results.BadRequest(new { error = "invalid path" }); }
+            if (!System.IO.File.Exists(full)) return Results.NotFound();
+            var ext = System.IO.Path.GetExtension(full).ToLowerInvariant();
+            if (ext != ".cs" && ext != ".razor" && ext != ".cshtml") return Results.BadRequest(new { error = "unsupported extension" });
+            string[] lines;
+            try { lines = System.IO.File.ReadAllLines(full); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+            var total = lines.Length;
+            int from = 0, to = total;
+            if (line is > 0)
+            {
+                var ctx = context ?? 40;
+                var lo = line.Value - 1 - ctx;
+                // When the caller knows the method's end line we widen the window down to it
+                // (plus a small tail) so the whole method body is visible without paging.
+                var hiSource = endLine is > 0 ? endLine.Value - 1 + ctx : line.Value - 1 + ctx;
+                from = Math.Max(0, lo);
+                to = Math.Min(total, hiSource);
+                if (to < from) to = from;
+            }
+            var slice = new string[to - from];
+            Array.Copy(lines, from, slice, 0, slice.Length);
+            return Results.Json(new
+            {
+                path = full,
+                language = ext.TrimStart('.'),
+                totalLines = total,
+                startLine = from + 1,
+                endLine = to,
+                methodStart = line,
+                methodEnd = endLine,
+                lines = slice
+            }, Json);
+        }).WithMetadata(new ExploreIgnoreAttribute()).ExcludeFromDescription();
+
         // Call-graph inspection — gated by EnableCallGraphInspection. Endpoint ids contain
         // forward slashes (e.g. "POST /invoices"), and ASP.NET Core's catch-all routing
         // doesn't decode `%2F` in path segments. Pass the id as a query parameter instead.
@@ -51,10 +96,13 @@ internal static class APICoverEndpoints
             var g = await svc.GetForEndpointAsync(id);
             return g is null ? Results.NotFound() : Results.Json(g, Json);
         });
-        cg.MapPost("/rebuild", async (ICallGraphService svc, IOptions<APICoverOptions> o) =>
+        cg.MapPost("/rebuild", async (ICallGraphService svc, IReverseCallIndexService reverse, IOptions<APICoverOptions> o) =>
         {
             if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
             var rebuilt = await svc.RebuildAllAsync();
+            // Rebuild keeps reverse index in sync — without this the UI would show stale
+            // caller data right after a forced rebuild.
+            await reverse.RebuildAsync();
             return Results.Json(new { rebuilt = rebuilt.Count }, Json);
         });
 
@@ -65,6 +113,86 @@ internal static class APICoverEndpoints
             if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
             var catalog = await svc.BuildAsync();
             return Results.Json(catalog, Json);
+        });
+
+        // Text grep across source files. Complements the IL-walked call graph: when the walker
+        // misses something (logger calls hidden by namespace filter, dynamic dispatch, manual
+        // `nameof()` references, etc.) the user can still find every textual mention of an
+        // identifier. Limited to files under the host content root + .cs/.razor extensions.
+        api.MapGet("/source/grep", (string q, int? maxHits, Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { error = "q required" });
+            if (q.Length < 2) return Results.BadRequest(new { error = "q too short (min 2 chars)" });
+
+            // Start at the content root and walk up to its enclosing solution / repo dir so the
+            // search sees sibling projects (PVC.WebApi → ../.. covers the whole PVC_WS tree).
+            string root;
+            try { root = System.IO.Path.GetFullPath(env.ContentRootPath); }
+            catch { return Results.Problem("content root unresolvable"); }
+            for (int i = 0; i < 4; i++)
+            {
+                var parent = System.IO.Directory.GetParent(root);
+                if (parent is null) break;
+                root = parent.FullName;
+            }
+
+            var cap = Math.Clamp(maxHits ?? 200, 1, 1000);
+            var hits = new List<object>(cap);
+            var ignoreDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "bin", "obj", "node_modules", "dist", ".git", ".vs", ".idea",
+            };
+
+            try
+            {
+                var queue = new Queue<string>();
+                queue.Enqueue(root);
+                while (queue.Count > 0 && hits.Count < cap)
+                {
+                    var dir = queue.Dequeue();
+                    string[] subdirs;
+                    try { subdirs = System.IO.Directory.GetDirectories(dir); } catch { continue; }
+                    foreach (var s in subdirs)
+                    {
+                        var name = System.IO.Path.GetFileName(s);
+                        if (ignoreDirs.Contains(name)) continue;
+                        queue.Enqueue(s);
+                    }
+                    string[] files;
+                    try { files = System.IO.Directory.GetFiles(dir, "*.cs"); } catch { continue; }
+                    foreach (var file in files)
+                    {
+                        if (hits.Count >= cap) break;
+                        string[] lines;
+                        try { lines = System.IO.File.ReadAllLines(file); } catch { continue; }
+                        for (int i = 0; i < lines.Length && hits.Count < cap; i++)
+                        {
+                            var line = lines[i];
+                            if (line.IndexOf(q, StringComparison.Ordinal) < 0) continue;
+                            hits.Add(new
+                            {
+                                path = file,
+                                line = i + 1,
+                                preview = line.Trim().Length > 200 ? line.Trim()[..200] + "…" : line.Trim()
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+
+            return Results.Json(new { query = q, root, capped = hits.Count >= cap, hits }, Json);
+        }).WithMetadata(new ExploreIgnoreAttribute()).ExcludeFromDescription();
+
+        // Reverse fan-in for a single service: "which endpoints (directly + transitively)
+        // end up here?" plus the immediate-parent services that route into it. Query param
+        // because service ids are dot-separated fully-qualified type names.
+        api.MapGet("/services/callers", async (string id, IReverseCallIndexService rev, IOptions<APICoverOptions> o) =>
+        {
+            if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(id)) return Results.BadRequest(new { error = "id required" });
+            var dto = await rev.GetCallersAsync(id);
+            return dto is null ? Results.NotFound() : Results.Json(dto, Json);
         });
 
         // Service map — topology view (nodes + edges + metrics + islands).
@@ -95,10 +223,34 @@ internal static class APICoverEndpoints
             return Results.Json(scenario, Json);
         });
 
-        api.MapDelete("/scenarios/{id}", async (string id, IScenarioStore store) =>
+        api.MapDelete("/scenarios/{id}", async (string id, IScenarioStore store, FilesystemRunHistoryStore historyStore) =>
         {
             await store.DeleteAsync(id);
+            historyStore.DeleteHistory(id);
             return Results.NoContent();
+        });
+
+        // Per-scenario persisted run history (last 10 terminal runs).
+        api.MapGet("/scenarios/{id}/history", (string id, FilesystemRunHistoryStore historyStore) =>
+        {
+            var runs = historyStore.ListHistory(id);
+            var arr = runs.Select(r => new
+            {
+                id = r.Id,
+                status = r.Status.ToString(),
+                startedAt = r.StartedAt,
+                completedAt = r.CompletedAt,
+                nodeCount = r.NodeResults.Count,
+                failedNodeCount = r.NodeResults.Count(n => n.Status == NodeStatus.Failed),
+                error = r.Error
+            });
+            return Results.Ok(arr);
+        });
+
+        api.MapGet("/scenarios/{id}/history/{runId}", (string id, string runId, FilesystemRunHistoryStore historyStore) =>
+        {
+            var run = historyStore.ListHistory(id).FirstOrDefault(r => r.Id == runId);
+            return run is null ? Results.NotFound() : Results.Ok(run);
         });
 
         api.MapPost("/scenarios/{id}/runs", async (string id, HttpRequest request, IScenarioStore store, IScenarioEngine engine) =>

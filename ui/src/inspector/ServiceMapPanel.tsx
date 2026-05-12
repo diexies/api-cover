@@ -2,14 +2,32 @@ import { useEffect, useMemo, useState } from 'react';
 import { type ServiceMap, type ServiceMapEdge, type ServiceMapNode, type ServiceMapNodeKind, getServiceMap } from '../api';
 import { MetricsTable } from './MetricsTable';
 import { SystemMapView } from './SystemMapView';
+import { LayeredDrillDown } from './LayeredDrillDown';
 
 interface Props {
   onClose?: () => void;
 }
 
 type View = 'map' | 'metrics';
+type MapMode = 'tree' | 'force';
+type DrillDirection = 'forward' | 'reverse';
+const MAP_MODE_STORAGE = 'apicover.servicemap.mode';
+const DRILL_DIRECTION_STORAGE = 'apicover.servicemap.direction';
+const SIDE_RAIL_STORAGE = 'apicover.side.sections';
+const RECENT_STORAGE = 'apicover.recent.endpoints';
+type SideSectionKey = 'recent' | 'hotspots' | 'isolated';
+const DEFAULT_OPEN: Record<SideSectionKey, boolean> = { recent: true, hotspots: true, isolated: true };
 
 const ALL_KINDS: ServiceMapNodeKind[] = ['endpoint', 'service', 'externalHttp', 'database'];
+
+/** Squash a full label like "PVC.WebApi.Controllers.X.YController.Method (PVC.WebApi)" down
+ * to just "Method" for compact side-rail rows. Falls back to the label as-is for non-method
+ * nodes (services, externals) where the short name is already meaningful. */
+function shortEndpointLabel(label: string): string {
+  const beforeParen = label.split(' (')[0];
+  const dot = beforeParen.lastIndexOf('.');
+  return dot >= 0 ? beforeParen.substring(dot + 1) : beforeParen;
+}
 
 const KIND_LABEL: Record<ServiceMapNodeKind, string> = {
   endpoint: 'endpoints',
@@ -31,9 +49,77 @@ export function ServiceMapPanel({ onClose }: Props) {
   const [loading, setLoading] = useState(true);
 
   const [view, setView] = useState<View>('map');
+  const [mapMode, setMapModeState] = useState<MapMode>(() => {
+    if (typeof window === 'undefined') return 'tree';
+    const stored = window.localStorage?.getItem(MAP_MODE_STORAGE);
+    return stored === 'force' ? 'force' : 'tree';
+  });
+  const setMapMode = (m: MapMode) => {
+    setMapModeState(m);
+    try { window.localStorage?.setItem(MAP_MODE_STORAGE, m); } catch { /* storage off */ }
+  };
   const [search, setSearch] = useState('');
   const [visibleKinds, setVisibleKinds] = useState<Set<ServiceMapNodeKind>>(() => new Set(ALL_KINDS));
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Counter pinned to a node id; LayeredDrillDown reacts to the latest value to switch its
+  // focus root (separate from `selectedId` which is just hover/highlight).
+  const [requestedFocus, setRequestedFocus] = useState<{ id: string; bump: number } | null>(null);
+  // Drill direction: forward (endpoint → services) is the long-established default; reverse
+  // (service → callers) is the new mode. Persisted so the user keeps whichever lens they
+  // were last working with.
+  const [direction, setDirectionState] = useState<DrillDirection>(() => {
+    if (typeof window === 'undefined') return 'forward';
+    const stored = window.localStorage?.getItem(DRILL_DIRECTION_STORAGE);
+    return stored === 'reverse' ? 'reverse' : 'forward';
+  });
+  const setDirection = (d: DrillDirection) => {
+    setDirectionState(d);
+    try { window.localStorage?.setItem(DRILL_DIRECTION_STORAGE, d); } catch { /* storage off */ }
+    // Clear focus state — node ids and pickers are not interchangeable between modes.
+    setSelectedId(null);
+    setRequestedFocus(null);
+  };
+  const pickEndpoint = (id: string) => {
+    setSelectedId(id);
+    setView('map');
+    setRequestedFocus((prev) => ({ id, bump: (prev?.bump ?? 0) + 1 }));
+  };
+  const [sideOpen, setSideOpenState] = useState<Record<SideSectionKey, boolean>>(() => {
+    if (typeof window === 'undefined') return DEFAULT_OPEN;
+    try {
+      const raw = window.localStorage?.getItem(SIDE_RAIL_STORAGE);
+      if (raw) return { ...DEFAULT_OPEN, ...JSON.parse(raw) };
+    } catch { /* ignore */ }
+    return DEFAULT_OPEN;
+  });
+  const toggleSection = (key: SideSectionKey) => {
+    setSideOpenState((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { window.localStorage?.setItem(SIDE_RAIL_STORAGE, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  const [recentIds, setRecentIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage?.getItem(RECENT_STORAGE);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const raw = window.localStorage?.getItem(RECENT_STORAGE);
+        setRecentIds(raw ? (JSON.parse(raw) as string[]) : []);
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('apicover.recent.changed', refresh as EventListener);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('apicover.recent.changed', refresh as EventListener);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   useEffect(() => { void reload(); }, []);
 
@@ -89,6 +175,17 @@ export function ServiceMapPanel({ onClose }: Props) {
     return map.nodes.filter((n) => n.isIsolated && n.kind === 'endpoint');
   }, [map]);
 
+  const recentEndpoints = useMemo(() => {
+    if (!map || recentIds.length === 0) return [];
+    const byId = new Map(map.nodes.map((n) => [n.id, n]));
+    const out: ServiceMapNode[] = [];
+    for (const id of recentIds) {
+      const n = byId.get(id);
+      if (n) out.push(n);
+    }
+    return out;
+  }, [map, recentIds]);
+
   return (
     <section className="sysmap" aria-label="system map">
       <header className="sysmap-head">
@@ -121,6 +218,36 @@ export function ServiceMapPanel({ onClose }: Props) {
             className={`sysmap-view-btn${view === 'metrics' ? ' is-active' : ''}`}
             onClick={() => setView('metrics')}
           >Metrics</button>
+          {view === 'map' && (
+            <>
+              <span className="sysmap-view-sep" aria-hidden="true" />
+              <button
+                className={`sysmap-view-btn${mapMode === 'tree' ? ' is-active' : ''}`}
+                onClick={() => setMapMode('tree')}
+                title="Top-down drill-down tree (recommended for large graphs)"
+              >Tree</button>
+              <button
+                className={`sysmap-view-btn${mapMode === 'force' ? ' is-active' : ''}`}
+                onClick={() => setMapMode('force')}
+                title="Force-directed mesh (best <150 nodes)"
+              >Force</button>
+            </>
+          )}
+          {view === 'map' && mapMode === 'tree' && (
+            <>
+              <span className="sysmap-view-sep" aria-hidden="true" />
+              <button
+                className={`sysmap-view-btn${direction === 'forward' ? ' is-active' : ''}`}
+                onClick={() => setDirection('forward')}
+                title="Endpoint → Services (forward call graph)"
+              >Endpoint →</button>
+              <button
+                className={`sysmap-view-btn${direction === 'reverse' ? ' is-active' : ''}`}
+                onClick={() => setDirection('reverse')}
+                title="Service → Endpoints (reverse fan-in: where is this service used?)"
+              >→ Service</button>
+            </>
+          )}
           <button className="sysmap-view-btn" onClick={() => void reload()} title="Refresh service map">↻</button>
           {onClose && (
             <button className="sysmap-view-btn sysmap-close" onClick={onClose} title="Close" aria-label="close">×</button>
@@ -159,7 +286,18 @@ export function ServiceMapPanel({ onClose }: Props) {
 
       {!loading && !error && map && (
         <div className="sysmap-stage">
-          {view === 'map' && (
+          {view === 'map' && mapMode === 'tree' && (
+            <LayeredDrillDown
+              map={map}
+              visibleKinds={visibleKinds}
+              search={search}
+              selectedId={selectedId}
+              requestedFocusId={requestedFocus}
+              direction={direction}
+              onSelect={setSelectedId}
+            />
+          )}
+          {view === 'map' && mapMode === 'force' && (
             <SystemMapView
               map={map}
               visibleKinds={visibleKinds}
@@ -179,53 +317,122 @@ export function ServiceMapPanel({ onClose }: Props) {
             </div>
           )}
 
-          <aside className="sysmap-side" aria-label="hot spots">
+          <aside className="sysmap-side" aria-label="side rail">
             <div className="sysmap-side-section">
-              <h3 className="sysmap-side-title">Hot spots</h3>
-              <p className="sysmap-side-hint">Top by coupling — touch these to feel the system.</p>
-              <ul className="sysmap-side-list">
-                {topCoupled.map((n) => (
-                  <li
-                    key={n.id}
-                    className={`sysmap-side-row${selectedId === n.id ? ' is-active' : ''}`}
-                    onClick={() => { setSelectedId(n.id); setView('map'); }}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { setSelectedId(n.id); setView('map'); } }}
-                  >
-                    <span className={`sysmap-side-dot dot-${n.kind}`} aria-hidden="true" />
-                    <span className="sysmap-side-label" title={n.fullName ?? n.label}>{n.label}</span>
-                    <span className="sysmap-side-metric">{Math.round(n.metrics.coupling)}</span>
-                  </li>
-                ))}
-                {topCoupled.length === 0 && (
-                  <li className="sysmap-side-empty">No nodes discovered yet.</li>
-                )}
-              </ul>
+              <button
+                type="button"
+                className={`sysmap-side-head${sideOpen.recent ? ' is-open' : ''}`}
+                onClick={() => toggleSection('recent')}
+                aria-expanded={sideOpen.recent}
+              >
+                <span className="sysmap-side-caret">{sideOpen.recent ? '▾' : '▸'}</span>
+                Recent
+                <span className="sysmap-side-count">{recentEndpoints.length}</span>
+              </button>
+              {sideOpen.recent && (
+                <div className="sysmap-side-body">
+                  <p className="sysmap-side-hint">Endpoints you spent ≥5s on. Saved locally.</p>
+                  <ul className="sysmap-side-list">
+                    {recentEndpoints.map((n) => (
+                      <li
+                        key={n.id}
+                        className={`sysmap-side-row${selectedId === n.id ? ' is-active' : ''}`}
+                        onClick={() => pickEndpoint(n.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter') pickEndpoint(n.id); }}
+                      >
+                        {n.httpMethod && (
+                          <span className={`method-badge method-${n.httpMethod.toLowerCase()}`}>{n.httpMethod.toUpperCase()}</span>
+                        )}
+                        <span className="sysmap-side-label" title={n.fullName ?? n.label}>
+                          {n.kind === 'endpoint' ? shortEndpointLabel(n.label) : n.label}
+                        </span>
+                      </li>
+                    ))}
+                    {recentEndpoints.length === 0 && (
+                      <li className="sysmap-side-empty">No recent visits yet.</li>
+                    )}
+                  </ul>
+                </div>
+              )}
             </div>
+
+            <div className="sysmap-side-section">
+              <button
+                type="button"
+                className={`sysmap-side-head${sideOpen.hotspots ? ' is-open' : ''}`}
+                onClick={() => toggleSection('hotspots')}
+                aria-expanded={sideOpen.hotspots}
+              >
+                <span className="sysmap-side-caret">{sideOpen.hotspots ? '▾' : '▸'}</span>
+                Hot spots
+                <span className="sysmap-side-count">{topCoupled.length}</span>
+              </button>
+              {sideOpen.hotspots && (
+                <div className="sysmap-side-body">
+                  <p className="sysmap-side-hint">Top by coupling — touch these to feel the system.</p>
+                  <ul className="sysmap-side-list">
+                    {topCoupled.map((n) => (
+                      <li
+                        key={n.id}
+                        className={`sysmap-side-row${selectedId === n.id ? ' is-active' : ''}`}
+                        onClick={() => pickEndpoint(n.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter') pickEndpoint(n.id); }}
+                      >
+                        <span className={`sysmap-side-dot dot-${n.kind}`} aria-hidden="true" />
+                        <span className="sysmap-side-label" title={n.fullName ?? n.label}>
+                          {n.kind === 'endpoint' ? shortEndpointLabel(n.label) : n.label}
+                        </span>
+                        <span className="sysmap-side-metric">{Math.round(n.metrics.coupling)}</span>
+                      </li>
+                    ))}
+                    {topCoupled.length === 0 && (
+                      <li className="sysmap-side-empty">No nodes discovered yet.</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+
             {isolatedEndpoints.length > 0 && (
               <div className="sysmap-side-section">
-                <h3 className="sysmap-side-title">No service call</h3>
-                <p className="sysmap-side-hint">
-                  Endpoints whose body has no detectable service / DB / external call.
-                  Likely backed by in-memory state we couldn't classify.
-                </p>
-                <ul className="sysmap-side-list">
-                  {isolatedEndpoints.map((n) => (
-                    <li
-                      key={n.id}
-                      className="sysmap-side-row is-isolated"
-                      title={n.fullName ?? n.label}
-                    >
-                      {n.httpMethod && (
-                        <span className={`sysmap-side-method method-${n.httpMethod.toLowerCase()}`}>
-                          {n.httpMethod.toUpperCase()}
-                        </span>
-                      )}
-                      <span className="sysmap-side-label">{n.label}</span>
-                    </li>
-                  ))}
-                </ul>
+                <button
+                  type="button"
+                  className={`sysmap-side-head${sideOpen.isolated ? ' is-open' : ''}`}
+                  onClick={() => toggleSection('isolated')}
+                  aria-expanded={sideOpen.isolated}
+                >
+                  <span className="sysmap-side-caret">{sideOpen.isolated ? '▾' : '▸'}</span>
+                  No service call
+                  <span className="sysmap-side-count">{isolatedEndpoints.length}</span>
+                </button>
+                {sideOpen.isolated && (
+                  <div className="sysmap-side-body">
+                    <p className="sysmap-side-hint">
+                      Endpoints whose body has no detectable service / DB / external call.
+                      Likely backed by in-memory state we couldn't classify.
+                    </p>
+                    <ul className="sysmap-side-list">
+                      {isolatedEndpoints.map((n) => (
+                        <li
+                          key={n.id}
+                          className="sysmap-side-row is-isolated"
+                          title={n.fullName ?? n.label}
+                        >
+                          {n.httpMethod && (
+                            <span className={`method-badge method-${n.httpMethod.toLowerCase()}`}>
+                              {n.httpMethod.toUpperCase()}
+                            </span>
+                          )}
+                          <span className="sysmap-side-label">{shortEndpointLabel(n.label)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </aside>

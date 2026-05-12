@@ -103,6 +103,61 @@ public static class RunsTools
             : (object)run;
     }
 
+    [McpServerTool(Name = "runs.timeline")]
+    [Description("Compact human-readable timeline of a run: one row per node in execution order, showing method, URL, status code, response body preview, and duration. Use this for a single-shot 'show me what happened' summary instead of pulling the whole Run snapshot. Bodies are truncated to ~400 chars.")]
+    public static async Task<object> Timeline(
+        IRunStore runs,
+        IScenarioStore scenarios,
+        [Description("Run id (returned by scenarios.run).")] string id,
+        [Description("Max body preview length per node (request/response). Default 400.")] int? bodyPreviewChars = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return new { error = "Required field 'id' is missing." };
+        }
+        var run = await runs.GetAsync(id, ct);
+        if (run is null) return new { error = $"No run found with id '{id}'." };
+
+        var preview = Math.Clamp(bodyPreviewChars ?? 400, 80, 4000);
+        var scenario = await scenarios.GetAsync(run.ScenarioId, ct);
+        var nodeOrder = scenario?.Nodes.Select(n => n.Id).ToList() ?? new List<string>();
+
+        static string Truncate(string? s, int max) =>
+            string.IsNullOrEmpty(s) ? string.Empty : s.Length <= max ? s : s.Substring(0, max) + "…";
+
+        var rows = run.NodeResults
+            .OrderBy(nr => nodeOrder.IndexOf(nr.NodeId) is var idx && idx >= 0 ? idx : int.MaxValue)
+            .ThenBy(nr => nr.StartedAt ?? DateTimeOffset.MaxValue)
+            .Select(nr => new
+            {
+                nodeId = nr.NodeId,
+                branchPath = nr.BranchPath.Count == 0 ? null : string.Join("/", nr.BranchPath),
+                status = nr.Status.ToString(),
+                method = nr.Request?.Method,
+                url = nr.Request?.Url,
+                requestBody = Truncate(nr.Request?.Body?.ToJsonString(), preview),
+                responseStatus = nr.Response?.Status,
+                responseBody = Truncate(nr.Response?.Body?.ToJsonString(), preview),
+                durationMs = nr.Duration?.TotalMilliseconds,
+                error = nr.Error,
+            })
+            .ToArray();
+
+        return new
+        {
+            runId = run.Id,
+            scenarioId = run.ScenarioId,
+            status = run.Status.ToString(),
+            startedAt = run.StartedAt,
+            completedAt = run.CompletedAt,
+            error = run.Error,
+            nodeCount = rows.Length,
+            failedNodeCount = rows.Count(r => r.status == nameof(NodeStatus.Failed)),
+            timeline = rows,
+        };
+    }
+
     [McpServerTool(Name = "runs.subscribe")]
     [Description("Stream live run lifecycle events (RunStarted, NodeStarted, NodeCompleted, RunFinished, …) as MCP progress notifications until the run terminates. Returns the final Run snapshot.")]
     public static async Task<object> Subscribe(

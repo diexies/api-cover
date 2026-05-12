@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using APICover.Abstractions.Discovery;
 using APICover.Abstractions.Services;
@@ -38,18 +39,31 @@ public static class APICoverServiceCollectionExtensions
             services.AddOptions<APICoverOptions>();
         }
 
+        services.AddTransient<AuthHeaderDelegatingHandler>();
         services.AddHttpClient(ScenarioEngine.HttpClientName)
             .ConfigureHttpClient((sp, client) =>
             {
                 var addr = sp.GetRequiredService<IOptions<APICoverOptions>>().Value.HostBaseAddress;
                 if (addr is not null) client.BaseAddress = addr;
-            });
+            })
+            .AddHttpMessageHandler<AuthHeaderDelegatingHandler>();
 
         services.TryAddSingleton<IRuleEvaluator, JsonLogicRuleEvaluator>();
         services.TryAddSingleton<DefaultBreakpointController>();
         services.TryAddSingleton<IBreakpointController>(sp => sp.GetRequiredService<DefaultBreakpointController>());
-        services.TryAddSingleton<IScenarioStore, InMemoryScenarioStore>();
-        services.TryAddSingleton<IRunStore, InMemoryRunStore>();
+        // Disk-backed scenario store so workspaces survive process restarts. The decorator
+        // hydrates from {ScenarioRoot} on first access.
+        services.TryAddSingleton<IScenarioStore, FilesystemScenarioStore>();
+        // Concrete in-memory store registered, then decorated with FilesystemRunHistoryStore so
+        // every terminal run is persisted under {RunHistoryRoot}/{scenarioId}/history. The
+        // decorator also exposes ListHistory/DeleteHistory for the history endpoints.
+        services.TryAddSingleton<InMemoryRunStore>();
+        services.TryAddSingleton<FilesystemRunHistoryStore>(sp => new FilesystemRunHistoryStore(
+            sp.GetRequiredService<InMemoryRunStore>(),
+            sp.GetRequiredService<IHostEnvironment>(),
+            sp.GetService<IOptions<APICoverOptions>>(),
+            sp.GetService<ILogger<FilesystemRunHistoryStore>>()));
+        services.TryAddSingleton<IRunStore>(sp => sp.GetRequiredService<FilesystemRunHistoryStore>());
         services.TryAddSingleton<IRunEventBus, InMemoryRunEventBus>();
         // Discovery is registered as a singleton instance once; both IEndpointDiscoveryService
         // and IEndpointMethodResolver alias to the same implementation so the call-graph walker
@@ -72,6 +86,7 @@ public static class APICoverServiceCollectionExtensions
         services.TryAddSingleton<ICallGraphService, CallGraphService>();
         services.TryAddSingleton<IServiceCatalogService, ServiceCatalogService>();
         services.TryAddSingleton<IServiceMapService, ServiceMapBuilder>();
+        services.TryAddSingleton<IReverseCallIndexService, ReverseCallIndexService>();
         services.AddHostedService<CallGraphWarmupHostedService>();
 
         return services;

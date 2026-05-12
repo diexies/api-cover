@@ -80,6 +80,9 @@ internal sealed class IlWalker
         private readonly PdbResolver _pdb;
         private readonly ILogger _logger;
         private readonly HashSet<string> _visited = new(StringComparer.Ordinal);
+        // Per-walk file cache. Most user assemblies have a handful of source files referenced
+        // many times across the graph; reading once and slicing keeps the walk fast.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string[]?> _fileLines = new(StringComparer.Ordinal);
         public List<string> Warnings { get; } = new();
 
         public WalkContext(CallGraphInspectionOptions opts, IServiceCollectionSnapshot di, PdbResolver pdb, ILogger logger)
@@ -150,7 +153,20 @@ internal sealed class IlWalker
                 // Coalesce consecutive duplicate children (e.g. iter.MoveNext() in a loop).
                 var deduped = Dedup(children);
 
-                var (file, line) = _pdb.TryResolve(effective, ilOffset: 0);
+                var (rangeFile, startLine, endLine) = _pdb.TryResolveRange(effective);
+                string? file = rangeFile;
+                int? line = startLine;
+                if (file is null)
+                {
+                    // Fall back to legacy single-point resolver for the file/line tuple when
+                    // ResolveRange produced nothing — preserves behaviour on PDBs with only
+                    // hidden sequence points (e.g. some minimal-API lambdas).
+                    var legacy = _pdb.TryResolve(effective, ilOffset: 0);
+                    file = legacy.FilePath;
+                    line = legacy.LineNumber;
+                }
+                var bodySnippet = TryReadSnippet(file, startLine, endLine);
+                var signals = ExtractSignals(il, module, typeGenericArgs, methodGenericArgs);
 
                 return new CallNode
                 {
@@ -165,7 +181,10 @@ internal sealed class IlWalker
                     Notes = asyncTag,
                     FilePath = file,
                     LineNumber = line,
+                    EndLine = endLine,
                     Summary = ResolveSummary(method) ?? ResolveSummary(effective),
+                    Signals = signals,
+                    BodySnippet = bodySnippet,
                     Calls = deduped,
                 };
             }
@@ -202,7 +221,20 @@ internal sealed class IlWalker
                 return Leaf(called, CallNodeKind.Dynamic);
             }
 
-            // 4. Framework noise.
+            // 4a. MediatR ISender.Send / IPublisher.Publish — recover concrete request type from
+            // the immediately-preceding `newobj` on the IL stack and resolve the matching
+            // IRequestHandler<TRequest,TResponse> from the DI snapshot. MUST run before the
+            // generic framework-noise filter so a user-included "MediatR." prefix doesn't drop
+            // the dispatcher silently.
+            if (IsMediatorDispatch(declaring, called))
+            {
+                var handlerHop = TryFollowMediator(called, callerModule, callerIl, ilOffset, parentDepth);
+                if (handlerHop is not null) return handlerHop;
+                // Fall through. The user-visible result is the same opaque-at-Mediator
+                // behaviour we had before.
+            }
+
+            // 4b. Framework noise.
             if (IsFrameworkNoise(declaring))
             {
                 if (!_opts.IncludeFrameworkCalls) return null;
@@ -489,6 +521,296 @@ internal sealed class IlWalker
             if (declaring.FullName == "System.Reflection.MethodBase" && called.Name == "Invoke") return true;
             if (declaring.FullName == "System.Linq.Expressions.LambdaExpression" && called.Name == "Compile") return true;
             return false;
+        }
+
+        /// <summary>Resolve a MediatR open-generic type by scanning every loaded assembly.
+        /// MediatR splits interfaces across MediatR.Contracts (IRequest, INotification) and
+        /// MediatR (IRequestHandler, INotificationHandler), so the request type's own assembly
+        /// may not contain the handler interface.</summary>
+        private static Type? FindMediatrType(string fullName)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                Type? t;
+                try { t = asm.GetType(fullName); }
+                catch { continue; }
+                if (t is not null) return t;
+            }
+            return null;
+        }
+
+        /// <summary>True for MediatR send / publish entry points where the IL walker normally
+        /// stops opaque. Covers ISender.Send, IMediator.Send, IPublisher.Publish, IMediator.Publish
+        /// regardless of generic close.</summary>
+        private static bool IsMediatorDispatch(Type? declaring, MethodBase called)
+        {
+            if (declaring is null) return false;
+            if (declaring.Namespace is not { } ns) return false;
+            if (!ns.Equals("MediatR", StringComparison.Ordinal)) return false;
+            var name = declaring.Name;
+            // ISender, IMediator (interfaces) — Send/Publish entry methods.
+            // Also covers Mediator concrete impl chosen during interface resolution.
+            if (name is "ISender" or "IMediator" or "IPublisher" or "Mediator")
+            {
+                return called.Name is "Send" or "Publish";
+            }
+            return false;
+        }
+
+        /// <summary>Recover the concrete request type pushed by the immediately preceding
+        /// <c>newobj</c> in the caller's IL, then walk the matching handler's <c>Handle</c>
+        /// method body. Returns <c>null</c> if no request type can be recovered or no handler
+        /// is registered — the caller then falls through to normal interface dispatch.</summary>
+        private CallNode? TryFollowMediator(MethodBase called, Module callerModule, byte[] callerIl, int ilOffset, int parentDepth)
+        {
+            var tok = IlOpCodeReader.FindLastNewobjTokenBefore(callerIl, ilOffset);
+            if (tok is null) return null;
+
+            MethodBase? ctor;
+            try { ctor = callerModule.ResolveMethod(tok.Value); }
+            catch { return null; }
+            var requestType = ctor?.DeclaringType;
+            if (requestType is null) return null;
+
+            // Pick the response type from the request's IRequest<TResponse> contract.
+            var requestIface = requestType.GetInterfaces()
+                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition().FullName == "MediatR.IRequest`1");
+            if (requestIface is null)
+            {
+                // Notification (publish) — IRequestHandler<TRequest>? Or IRequest without generic.
+                // Best-effort: try IRequest (no response) closed handler shape.
+                var notifIface = requestType.GetInterfaces()
+                    .FirstOrDefault(i => i.FullName == "MediatR.INotification");
+                if (notifIface is null) return null;
+            }
+
+            // Build closed IRequestHandler<TRequest,TResponse> (or INotificationHandler<TRequest>) type.
+            Type? handlerIface = null;
+            try
+            {
+                if (requestIface is not null)
+                {
+                    var responseType = requestIface.GetGenericArguments()[0];
+                    var open = FindMediatrType("MediatR.IRequestHandler`2");
+                    if (open is null) return null;
+                    handlerIface = open.MakeGenericType(requestType, responseType);
+                }
+                else
+                {
+                    var notifIface = requestType.GetInterfaces()
+                        .FirstOrDefault(i => i.FullName == "MediatR.INotification");
+                    if (notifIface is null) return null;
+                    var open = FindMediatrType("MediatR.INotificationHandler`1");
+                    if (open is null) return null;
+                    handlerIface = open.MakeGenericType(requestType);
+                }
+            }
+            catch { return null; }
+            if (handlerIface is null) return null;
+
+            var hits = _di.ResolveImplementations(handlerIface);
+            // Pick the first concrete impl. MediatR's DI extension registers IRequestHandler
+            // closed-generic with a factory (no ImplementationType), so we fall back to an
+            // AppDomain type-scan for the single implementor.
+            Type? implType = hits.Count > 0 ? hits[0].ImplementationType : null;
+            if (implType is null) implType = TryFindSingleImplementation(handlerIface);
+            if (implType is null) return null;
+
+            var handleMethod = implType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(m => m.Name == "Handle"
+                                     && m.GetParameters().Length == 2
+                                     && m.GetParameters()[0].ParameterType == requestType);
+            if (handleMethod is null) return null;
+
+            var handlerCall = WalkMethod(handleMethod, parentDepth + 1, isRoot: false);
+            return new CallNode
+            {
+                DisplayName = FormatDisplay(called),
+                DeclaringType = called.DeclaringType?.FullName,
+                MethodName = called.Name,
+                ParameterTypes = called.GetParameters().Select(p => p.ParameterType.FullName ?? p.ParameterType.Name).ToList(),
+                Kind = CallNodeKind.Interface,
+                ResolvedImplType = implType.FullName,
+                Notes = $"(MediatR → {implType.Name})",
+                Calls = new List<CallNode> { handlerCall },
+            };
+        }
+
+        /// <summary>Pull the first 6–8 source lines of a method body. Cached per file inside the
+        /// walk so repeated method visits in a graph don't re-read the same source. Returns null
+        /// when PDB info is missing, the file is unreachable / oversized, or the slice is empty.</summary>
+        private string? TryReadSnippet(string? path, int? startLine, int? endLine)
+        {
+            if (path is null || startLine is null || startLine.Value <= 0) return null;
+            const int maxSnippetLines = 8;
+            const int maxLineLength = 160;
+            const long maxFileBytes = 2_000_000;
+            try
+            {
+                var lines = _fileLines.GetOrAdd(path, p =>
+                {
+                    try
+                    {
+                        var fi = new System.IO.FileInfo(p);
+                        if (!fi.Exists || fi.Length > maxFileBytes) return null;
+                        return System.IO.File.ReadAllLines(p, System.Text.Encoding.UTF8);
+                    }
+                    catch { return null; }
+                });
+                if (lines is null || lines.Length == 0) return null;
+
+                int start = Math.Max(1, startLine.Value);
+                int end = endLine is > 0 ? Math.Min(endLine.Value, lines.Length) : Math.Min(start + maxSnippetLines - 1, lines.Length);
+                if (end < start) return null;
+                int sliceCount = Math.Min(maxSnippetLines, end - start + 1);
+                var raw = new string[sliceCount];
+                Array.Copy(lines, start - 1, raw, 0, sliceCount);
+
+                // Compute common leading whitespace across non-blank lines so the snippet looks
+                // dedented (indented method bodies don't carry their declaring-class indent).
+                int minIndent = int.MaxValue;
+                foreach (var ln in raw)
+                {
+                    if (string.IsNullOrWhiteSpace(ln)) continue;
+                    int i = 0;
+                    while (i < ln.Length && (ln[i] == ' ' || ln[i] == '\t')) i++;
+                    if (i < minIndent) minIndent = i;
+                }
+                if (minIndent == int.MaxValue) minIndent = 0;
+
+                var cleaned = new List<string>(sliceCount);
+                foreach (var ln in raw)
+                {
+                    string s = ln.Length >= minIndent ? ln.Substring(minIndent) : ln;
+                    if (s.Length > maxLineLength) s = s.Substring(0, maxLineLength - 1) + "…";
+                    cleaned.Add(s);
+                }
+                // Drop trailing blank lines so snippet doesn't have empty tail in the UI.
+                while (cleaned.Count > 0 && string.IsNullOrWhiteSpace(cleaned[^1])) cleaned.RemoveAt(cleaned.Count - 1);
+                if (cleaned.Count == 0) return null;
+                return string.Join("\n", cleaned);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Scan the IL body of a method once to extract intent signals:
+        ///  - exception types thrown (Throws)
+        ///  - first ldstr argument to logger / IFluentValidation Add / etc. (LogMessage)
+        ///  - count of conditional branches as a rough complexity marker (Branches)
+        ///  - other free-standing literal strings (Literal) — capped.
+        /// Cheap: single IL pass, dedupes, hard caps so a method body can't blow up the payload.</summary>
+        private static List<CallSignal>? ExtractSignals(byte[] il, Module module, Type[]? typeGenericArgs, Type[]? methodGenericArgs)
+        {
+            try
+            {
+                var throws = new List<string>();
+                var seenThrow = new HashSet<string>(StringComparer.Ordinal);
+                var logMsgs = new List<string>();
+                var literals = new List<string>();
+                var seenLit = new HashSet<string>(StringComparer.Ordinal);
+                int branchCount = 0;
+                int? pendingNewobjToken = null;
+                string? lastLdstr = null;
+                bool lastWasNewobj = false;
+
+                var brfalse = System.Reflection.Emit.OpCodes.Brfalse;
+                var brfalse_s = System.Reflection.Emit.OpCodes.Brfalse_S;
+                var brtrue = System.Reflection.Emit.OpCodes.Brtrue;
+                var brtrue_s = System.Reflection.Emit.OpCodes.Brtrue_S;
+                var sw = System.Reflection.Emit.OpCodes.Switch;
+                var ldstr = System.Reflection.Emit.OpCodes.Ldstr;
+                var newobj = System.Reflection.Emit.OpCodes.Newobj;
+                var throwOp = System.Reflection.Emit.OpCodes.Throw;
+                var callOp = System.Reflection.Emit.OpCodes.Call;
+                var callvirtOp = System.Reflection.Emit.OpCodes.Callvirt;
+
+                foreach (var ins in IlOpCodeReader.EnumerateAll(il, module))
+                {
+                    var op = ins.Op;
+                    if (op == brfalse || op == brfalse_s || op == brtrue || op == brtrue_s || op == sw)
+                    {
+                        branchCount++;
+                        continue;
+                    }
+                    if (op == ldstr)
+                    {
+                        lastLdstr = ins.StringLiteral;
+                        lastWasNewobj = false;
+                        continue;
+                    }
+                    if (op == newobj)
+                    {
+                        pendingNewobjToken = ins.Token;
+                        lastWasNewobj = true;
+                        continue;
+                    }
+                    if (op == throwOp)
+                    {
+                        // Resolve the exception type from the immediately-preceding newobj.
+                        if (lastWasNewobj && pendingNewobjToken is int tok)
+                        {
+                            try
+                            {
+                                var ctor = module.ResolveMethod(tok, typeGenericArgs, methodGenericArgs);
+                                var et = ctor?.DeclaringType;
+                                if (et is not null)
+                                {
+                                    var name = et.Name;
+                                    if (seenThrow.Add(name)) throws.Add(name);
+                                }
+                            }
+                            catch { /* ignore */ }
+                        }
+                        lastWasNewobj = false;
+                        continue;
+                    }
+                    if (op == callOp || op == callvirtOp)
+                    {
+                        if (lastLdstr is not null && ins.Token is int callTok)
+                        {
+                            try
+                            {
+                                var m = module.ResolveMethod(callTok, typeGenericArgs, methodGenericArgs);
+                                var dt = m?.DeclaringType?.FullName ?? "";
+                                if (dt.Contains("Logger") || dt.Contains("ILogger") ||
+                                    dt.Contains("BekoLog") || dt.EndsWith("LoggerService", StringComparison.Ordinal))
+                                {
+                                    if (logMsgs.Count < 6) logMsgs.Add(lastLdstr);
+                                }
+                            }
+                            catch { /* ignore */ }
+                        }
+                        lastLdstr = null;
+                        lastWasNewobj = false;
+                        continue;
+                    }
+                    // Any other op resets the "last ldstr" window so we don't smear it across
+                    // unrelated instructions, but we still collect it as a general literal.
+                    if (lastLdstr is not null && literals.Count < 4)
+                    {
+                        var s = lastLdstr.Trim();
+                        if (s.Length is > 2 and < 160 && !seenLit.Contains(s) && !logMsgs.Contains(s) && !throws.Contains(s))
+                        {
+                            seenLit.Add(s);
+                            literals.Add(s);
+                        }
+                        lastLdstr = null;
+                    }
+                    lastWasNewobj = false;
+                }
+
+                var list = new List<CallSignal>();
+                foreach (var t in throws) list.Add(new CallSignal { Kind = CallSignalKind.Throws, Text = t });
+                foreach (var m in logMsgs) list.Add(new CallSignal { Kind = CallSignalKind.LogMessage, Text = m });
+                foreach (var l in literals) list.Add(new CallSignal { Kind = CallSignalKind.Literal, Text = l });
+                if (branchCount > 0) list.Add(new CallSignal { Kind = CallSignalKind.Branches, Text = branchCount.ToString() });
+                return list.Count > 0 ? list : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private bool IsFrameworkNoise(Type? declaring)

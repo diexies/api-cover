@@ -5,6 +5,7 @@ interface Capability {
 
 const CAPABILITIES: Capability[] = [
   { token: '/scenario', hint: 'scaffold a scenario from your code' },
+  { token: '/discover', hint: 'infer likely scenarios from the api surface' },
   { token: '/scan',     hint: 'index endpoints and populate memory' },
   { token: '/explain',  hint: 'explain how an endpoint behaves' },
   { token: '/map',      hint: 'service / dependency map' },

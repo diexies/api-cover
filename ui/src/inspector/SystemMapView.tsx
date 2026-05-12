@@ -29,8 +29,17 @@ const RING_GAP = 130;
 const RING_BASE = 0;
 const RADIAL_K = 0.05;
 const APP_ROOT_ID = 'app:host';
-// Reduced-motion: run a shot of ticks then freeze. Live mode runs forever.
+// Reduced-motion: run a shot of ticks then freeze. Normal mode also caps at a
+// settle budget for graphs >= LARGE_GRAPH_N; below that, runs to natural sleep.
 const RM_TICK_BUDGET = 240;
+// O(N²) repulsion makes large graphs cost-prohibitive past ~150 nodes (60fps drops
+// to single digits with 200+). Above this threshold we hard-cap tick count and
+// rely on auto-freeze (KE < threshold) to stop spinning the CPU.
+const LARGE_GRAPH_N = 150;
+const LARGE_GRAPH_TICK_BUDGET = 320;
+// Kinetic-energy threshold for auto-freeze. Below this, layout is "settled"
+// and we stop ticking until the user interacts.
+const SETTLE_KE_PER_NODE = 0.05;
 
 const RM_QUERY = '(prefers-reduced-motion: reduce)';
 
@@ -109,17 +118,39 @@ export function SystemMapView({
         positions.set(n.id, { x: cx + Math.cos(a) * targetR, y: cy + Math.sin(a) * targetR, vx: 0, vy: 0 });
       }
     }
-    // Reset reduced-motion budget so layout settles after each filter change.
-    if (matchesReducedMotion()) tickBudgetRef.current = RM_TICK_BUDGET;
-  }, [nodeIds, width, height]);
+    // Reset tick budget so layout settles after each filter change. Reduced-motion users get
+    // the smaller budget. Large graphs (>=LARGE_GRAPH_N) get a cap regardless of preference
+    // because O(N²) repulsion is what causes the laggy/flickery render the user sees with
+    // 200+ nodes (e.g. PVC's 243-endpoint discovery surface).
+    if (matchesReducedMotion()) {
+      tickBudgetRef.current = RM_TICK_BUDGET;
+    } else if (filtered.nodes.length >= LARGE_GRAPH_N) {
+      tickBudgetRef.current = LARGE_GRAPH_TICK_BUDGET;
+    } else {
+      tickBudgetRef.current = Number.POSITIVE_INFINITY;
+    }
+  }, [nodeIds, width, height, filtered.nodes.length]);
 
   // ── rAF loop ────────────────────────────────────────────────────────────
   useEffect(() => {
     let raf = 0;
+    // Counter so settled state can still re-render on interaction without
+    // burning frames in idle. When ke per node falls below SETTLE_KE_PER_NODE
+    // we stop both stepping and re-rendering until a drag/pan/wheel wakes us.
+    let consecutiveSettled = 0;
     function loop() {
       if (runningRef.current && tickBudgetRef.current > 0) {
-        step(filtered.nodes, filtered.edges, positionsRef.current, dragRef.current, width, height);
+        const ke = step(filtered.nodes, filtered.edges, positionsRef.current, dragRef.current, width, height);
         if (Number.isFinite(tickBudgetRef.current)) tickBudgetRef.current -= 1;
+        const kePerNode = filtered.nodes.length > 0 ? ke / filtered.nodes.length : 0;
+        if (kePerNode < SETTLE_KE_PER_NODE && !dragRef.current && !panRef.current) {
+          consecutiveSettled++;
+          if (consecutiveSettled > 30) {
+            tickBudgetRef.current = 0; // freeze
+          }
+        } else {
+          consecutiveSettled = 0;
+        }
         forceRender((n) => (n + 1) & 0xffff);
       }
       raf = requestAnimationFrame(loop);
@@ -161,6 +192,7 @@ export function SystemMapView({
           tx: tx0 + (e.clientX - sx),
           ty: ty0 + (e.clientY - sy),
         };
+        if (tickBudgetRef.current <= 0) tickBudgetRef.current = 1;
         forceRender((n) => (n + 1) & 0xffff);
       }
     }
@@ -228,6 +260,10 @@ export function SystemMapView({
         tx: mx - worldX * newScale,
         ty: my - worldY * newScale,
       };
+      // Wheel zoom alone does not need physics ticks (pan-only repaint), but it
+      // also should not get stuck if the layout has frozen — wake the loop just
+      // long enough for the next paint frame.
+      if (tickBudgetRef.current <= 0) tickBudgetRef.current = 1;
       forceRender((n) => (n + 1) & 0xffff);
     }
     el.addEventListener('wheel', onWheelNative, { passive: false });
@@ -364,7 +400,7 @@ function step(
   drag: { id: string } | null,
   width: number,
   height: number,
-) {
+): number {
   const cx = width / 2;
   const cy = height / 2;
   const draggedId = drag?.id ?? null;
@@ -411,6 +447,7 @@ function step(
   // 3. Radial tier bias + integrate. Each node has a target ring radius based
   // on its BFS level from the application root. The radial spring pulls the
   // node toward its ring; angular position is left to repulsion + edge springs.
+  let kineticEnergy = 0;
   for (let i = 0; i < arr.length; i++) {
     const { id, p, level } = arr[i];
     if (id === APP_ROOT_ID) {
@@ -437,7 +474,9 @@ function step(
     p.vy = clamp(p.vy, -MAX_VEL, MAX_VEL);
     p.x += p.vx * DT;
     p.y += p.vy * DT;
+    kineticEnergy += p.vx * p.vx + p.vy * p.vy;
   }
+  return kineticEnergy;
 }
 
 /* ─── Visual helpers ─────────────────────────────────────────────────────── */

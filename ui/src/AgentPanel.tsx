@@ -32,6 +32,9 @@ interface Props {
   initialHistoryOpen?: boolean;
   /** Called once the panel has consumed initialPrompt so the parent can clear pending state. */
   onPromptConsumed?: () => void;
+  /** Fired when a run finishes successfully. Lets the parent react to side effects
+   *  (e.g. scenario-generation runs landing a new scenario in the store). */
+  onRunCompleted?: (modeLabel: string | null) => void;
 }
 
 type Tab = 'chat' | 'memory' | 'mcp';
@@ -52,6 +55,7 @@ export function AgentPanel({
   autoStart,
   initialHistoryOpen,
   onPromptConsumed,
+  onRunCompleted,
 }: Props) {
   const [status, setStatus] = useState<AgentStatus>(initialStatus);
   const ready = status.mode !== 'Disabled' && (status.mode === 'Max' || status.hasApiKey);
@@ -125,8 +129,14 @@ export function AgentPanel({
     if (!t || busy || !ready || budgetExhausted) return;
     resetTimeline(t, modeLabel);
     setBusy(true);
+    // Map UI chip slug → backend AgentRunMode. Slugs come from KNOWN_MODES in
+    // Dashboard.tsx.
+    const apiMode =
+      modeLabel === 'scenario' ? 'scenarioGen' :
+      modeLabel === 'discover' ? 'scenarioInfer' :
+      'chat';
     try {
-      const r = await startAgentRun(t, 'chat');
+      const r = await startAgentRun(t, apiMode);
       setActiveRunId(r.runId);
       unsubRef.current = subscribeAgentEvents(r.runId, onEvent);
     } catch (e) {
@@ -186,6 +196,7 @@ export function AgentPanel({
       setScanBusy(false);
       unsubRef.current?.();
       refreshStatus();
+      onRunCompleted?.(activeMode);
     } else if (evt.type === 'RunFailed') {
       setBusy(false);
       setScanBusy(false);

@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { NodeStatus } from './api';
 import { hexToRgba } from './colors';
 
@@ -58,7 +58,7 @@ const methodClass: Record<string, string> = {
   PATCH: 'method-patch',
 };
 
-export function ApiNodeView({ data }: NodeProps & { data: ApiNodeData }) {
+function ApiNodeViewImpl({ data }: NodeProps & { data: ApiNodeData }) {
   const canShowResponse = data.status === 'succeeded' || data.status === 'failed';
   const [open, setOpen] = useState(false);
   // Auto-open the balloon the moment a node finishes; user can still close manually.
@@ -148,3 +148,5 @@ export function ApiNodeView({ data }: NodeProps & { data: ApiNodeData }) {
     </div>
   );
 }
+
+export const ApiNodeView = memo(ApiNodeViewImpl);
