@@ -1,4 +1,5 @@
 import { NodeResizer, type NodeProps } from '@xyflow/react';
+import { memo } from 'react';
 import { hexToRgba } from './colors';
 
 export interface GroupAreaData extends Record<string, unknown> {
@@ -26,7 +27,7 @@ export interface GroupAreaData extends Record<string, unknown> {
  * out across N iterations, the label surfaces a live progress counter and pulses; after the
  * run completes the counter switches to a pass/fail tally.
  */
-export function GroupAreaNode({ data, selected }: NodeProps & { data: GroupAreaData }) {
+function GroupAreaNodeImpl({ data, selected }: NodeProps & { data: GroupAreaData }) {
   const tint = data.color ?? '#a855f7';
   const bg = hexToRgba(tint, 0.08);
   const total = data.totalIter ?? data.count ?? 1;
@@ -68,4 +69,6 @@ export function GroupAreaNode({ data, selected }: NodeProps & { data: GroupAreaD
     </div>
   );
 }
+
+export const GroupAreaNode = memo(GroupAreaNodeImpl);
 

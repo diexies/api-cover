@@ -3,6 +3,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using APICover.Abstractions.Models;
 using APICover.Abstractions.Services;
+using APICover.Abstractions.Validation;
 
 namespace APICover.Mcp.Tools;
 
@@ -44,47 +45,60 @@ public static class ScenariosTools
     }
 
     [McpServerTool(Name = "scenarios.save")]
-    [Description("Create or replace a scenario. Pass the full Scenario JSON (id, name, nodes[], edges[]). Validates that id matches ^[a-z0-9-]+$ and every edge endpoint exists in nodes[].")]
+    [Description("Create or replace a scenario. Pass the full Scenario JSON object (id, name, nodes[], edges[]). Validates id matches ^[a-z0-9-]+$ and every edge endpoint exists in nodes[].")]
     public static async Task<object> Save(
         IScenarioStore store,
-        [Description("Scenario JSON. Top-level fields: id, name, description?, tags?, nodes[], edges[], startNodeIds?, breakpoints?, groups?, caseSets?")] JsonElement scenario,
+        [Description("Scenario JSON object. Top-level fields: id, name, description?, tags?, nodes[], edges[], startNodeIds?, breakpoints?, groups?, caseSets?")] JsonElement scenario,
         CancellationToken ct)
     {
-        Scenario parsed;
+        // Some MCP clients (notably Claude Code) serialise object arguments as JSON-encoded
+        // strings when the param schema doesn't pin a type. Accept both shapes: parse the
+        // string into a JsonElement first if needed.
+        var payload = scenario;
+        if (payload.ValueKind == JsonValueKind.String)
+        {
+            var raw = payload.GetString();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return new { ok = false, errors = new[] { "scenario payload is an empty string." } };
+            }
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                payload = doc.RootElement.Clone();
+            }
+            catch (JsonException ex)
+            {
+                return new { ok = false, errors = new[] { $"scenario payload is not valid JSON: {ex.Message}" } };
+            }
+        }
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return new { ok = false, errors = new[] { $"scenario payload must be a JSON object, got {payload.ValueKind}." } };
+        }
+
+        Scenario? parsed = null;
         try
         {
-            parsed = scenario.Deserialize<Scenario>(McpJson.Options)
-                ?? throw new ArgumentException("scenario payload is null.");
+            parsed = payload.Deserialize<Scenario>(McpJson.Options);
         }
         catch (JsonException ex)
         {
-            throw new ArgumentException($"scenario payload is not a valid Scenario JSON: {ex.Message}");
+            return new { ok = false, errors = new[] { $"scenario payload failed to deserialise: {ex.Message}" } };
+        }
+        if (parsed is null)
+        {
+            return new { ok = false, errors = new[] { "scenario payload deserialised to null." } };
         }
 
-        if (string.IsNullOrWhiteSpace(parsed.Id) ||
-            !System.Text.RegularExpressions.Regex.IsMatch(parsed.Id, "^[a-z0-9-]+$"))
+        var validation = ScenarioValidator.Validate(parsed);
+        if (!validation.IsValid)
         {
-            throw new ArgumentException("Scenario id must match ^[a-z0-9-]+$.");
-        }
-        if (parsed.Nodes.Count == 0)
-        {
-            throw new ArgumentException("Scenario must contain at least one node.");
-        }
-        var nodeIds = parsed.Nodes.Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var edge in parsed.Edges)
-        {
-            if (!nodeIds.Contains(edge.From))
-            {
-                throw new ArgumentException($"Edge.from references unknown node '{edge.From}'.");
-            }
-            if (!nodeIds.Contains(edge.To))
-            {
-                throw new ArgumentException($"Edge.to references unknown node '{edge.To}'.");
-            }
+            return new { ok = false, errors = validation.Errors.ToArray() };
         }
 
         await store.SaveAsync(parsed, ct);
-        return new { ok = true, id = parsed.Id, nodeCount = parsed.Nodes.Count };
+        return new { ok = true, id = parsed.Id, nodeCount = parsed.Nodes.Count, edgeCount = parsed.Edges.Count };
     }
 
     [McpServerTool(Name = "scenarios.delete")]

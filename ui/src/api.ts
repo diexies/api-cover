@@ -1,5 +1,7 @@
 // Thin fetch wrapper around the APICover JSON API. Centralised so the base path can move.
 
+import { apiFetch, apiJson } from './apiClient';
+
 export const apiBase = '/apicover/api';
 
 export interface EndpointParameterInfo {
@@ -191,15 +193,11 @@ export function aggregateNodeResult(run: Run | null | undefined, nodeId: string)
 }
 
 export async function listScenarios(): Promise<Scenario[]> {
-  const r = await fetch(`${apiBase}/scenarios`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return apiJson<Scenario[]>(`${apiBase}/scenarios`);
 }
 
 export async function getScenario(id: string): Promise<Scenario> {
-  const r = await fetch(`${apiBase}/scenarios/${encodeURIComponent(id)}`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return apiJson<Scenario>(`${apiBase}/scenarios/${encodeURIComponent(id)}`);
 }
 
 export async function saveScenario(scenario: Scenario): Promise<void> {
@@ -240,18 +238,36 @@ export async function startRun(
 }
 
 export async function getRun(id: string): Promise<Run> {
-  const r = await fetch(`${apiBase}/runs/${encodeURIComponent(id)}`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return apiJson<Run>(`${apiBase}/runs/${encodeURIComponent(id)}`);
 }
 
 export async function listRuns(scenarioId?: string): Promise<Run[]> {
   const url = scenarioId
     ? `${apiBase}/runs?scenarioId=${encodeURIComponent(scenarioId)}`
     : `${apiBase}/runs`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return apiJson<Run[]>(url);
+}
+
+export interface ScenarioHistoryEntry {
+  id: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string;
+  nodeCount: number;
+  failedNodeCount: number;
+  error?: string;
+}
+
+export async function listScenarioHistory(scenarioId: string): Promise<ScenarioHistoryEntry[]> {
+  return apiJson<ScenarioHistoryEntry[]>(
+    `${apiBase}/scenarios/${encodeURIComponent(scenarioId)}/history`,
+  );
+}
+
+export async function getScenarioHistoryRun(scenarioId: string, runId: string): Promise<Run> {
+  return apiJson<Run>(
+    `${apiBase}/scenarios/${encodeURIComponent(scenarioId)}/history/${encodeURIComponent(runId)}`,
+  );
 }
 
 export interface GitCommit {
@@ -372,6 +388,12 @@ export type CallNodeKind =
   | 'dynamic'
   | 'opaque';
 
+export type CallSignalKind = 'throws' | 'logMessage' | 'branches' | 'literal';
+export interface CallSignalDto {
+  kind: CallSignalKind;
+  text: string;
+}
+
 export interface CallNodeDto {
   displayName: string;
   declaringType?: string;
@@ -383,6 +405,9 @@ export interface CallNodeDto {
   summary?: string;
   filePath?: string;
   lineNumber?: number;
+  endLine?: number;
+  signals?: CallSignalDto[];
+  bodySnippet?: string;
   calls?: CallNodeDto[];
 }
 
@@ -452,9 +477,87 @@ export async function getServiceCatalog(): Promise<ServiceCatalog | null> {
 }
 
 export async function listEndpoints(): Promise<EndpointDescriptor[]> {
-  const r = await fetch(`${apiBase}/discovery`);
+  return apiJson<EndpointDescriptor[]>(`${apiBase}/discovery`);
+}
+
+export interface SourceSlice {
+  path: string;
+  language: string;
+  totalLines: number;
+  startLine: number;
+  endLine: number;
+  /** PDB method start line (first body line) when caller passed it. */
+  methodStart?: number;
+  /** PDB method end line (last body line) when caller passed it. */
+  methodEnd?: number;
+  lines: string[];
+}
+
+export async function getSource(
+  path: string,
+  line?: number,
+  endLine?: number,
+  context = 12,
+): Promise<SourceSlice> {
+  const params = new URLSearchParams({ path });
+  if (line && line > 0) params.set('line', String(line));
+  if (endLine && endLine > 0) params.set('endLine', String(endLine));
+  params.set('context', String(context));
+  return apiJson<SourceSlice>(`${apiBase}/source?${params}`);
+}
+
+// Reverse fan-in — "where is this service used?"
+export interface CallerEntryDto {
+  endpointId: string;
+  via: string[];
+  callSites: number;
+}
+export interface CallerServiceEntryDto {
+  id: string;
+  shortName: string;
+  calledByEndpoints: string[];
+  filePath?: string;
+  lineNumber?: number;
+  endLine?: number;
+  bodySnippet?: string;
+  summary?: string;
+  methodName?: string;
+}
+export interface ServiceCallersDto {
+  serviceId: string;
+  shortName: string;
+  isInterface: boolean;
+  resolvedImplType?: string;
+  directCallers: CallerEntryDto[];
+  callerServices: CallerServiceEntryDto[];
+  methodCallers: Record<string, string[]>;
+  transitiveEndpointCount: number;
+}
+
+export interface SourceGrepHit {
+  path: string;
+  line: number;
+  preview: string;
+}
+export interface SourceGrepResult {
+  query: string;
+  root: string;
+  capped: boolean;
+  hits: SourceGrepHit[];
+}
+export async function grepSource(query: string, maxHits = 200): Promise<SourceGrepResult> {
+  const params = new URLSearchParams({ q: query, maxHits: String(maxHits) });
+  return apiJson<SourceGrepResult>(`${apiBase}/source/grep?${params}`);
+}
+
+export async function getServiceCallers(serviceId: string): Promise<ServiceCallersDto | null> {
+  const url = `${apiBase}/services/callers?id=${encodeURIComponent(serviceId)}`;
+  const r = await apiFetch(url);
+  if (r.status === 404) return null;
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  // Parse errors surface to the caller — silent catch was masking shape mismatches and the
+  // reverse-drill canvas would render "1 node · 0 links" with no clue why.
+  return (await r.json()) as ServiceCallersDto;
 }
 
 // ---------------------------------------------------------------------------
@@ -734,7 +837,7 @@ export async function deleteAgentSession(id: string): Promise<void> {
   if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
 }
 
-export async function startAgentRun(prompt: string, mode: 'chat' | 'scan' = 'chat'): Promise<{ runId: string; mode: string }> {
+export async function startAgentRun(prompt: string, mode: 'chat' | 'scan' | 'scenarioGen' | 'scenarioInfer' = 'chat'): Promise<{ runId: string; mode: string }> {
   const r = await fetch(`${apiBase}/agent/runs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

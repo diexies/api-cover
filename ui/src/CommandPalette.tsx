@@ -95,7 +95,7 @@ export function CommandPalette({ commands }: Props) {
   }
 
   return (
-    <div className="cmdk-backdrop" onMouseDown={close} role="dialog" aria-label="command palette">
+    <div className="cmdk-backdrop" onMouseDown={close} role="dialog" aria-modal="true" aria-label="command palette">
       <div className="cmdk-shell" onMouseDown={(e) => e.stopPropagation()}>
         <input
           ref={inputRef}

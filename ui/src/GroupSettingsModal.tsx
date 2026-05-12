@@ -67,7 +67,7 @@ export function GroupSettingsModal({ initial, groupNodeIds, onSave, onDelete, on
   return (
     <>
       <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel" role="dialog" aria-label="Group settings">
+      <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Group settings">
         <div className="modal-head">
           <h3>Group settings</h3>
           <button className="close-btn" onClick={onClose}>×</button>

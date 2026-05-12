@@ -1082,6 +1082,91 @@ code {
   margin: 0 2px;
 }
 
+/* Per-scenario run history panel — disk-persisted last 10. Each row shows status,
+   timestamp, node count, and a copy-markdown button. */
+.run-history {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  margin-top: var(--sp-3);
+}
+.run-history-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--hairline);
+}
+.run-history-title { font-weight: 600; font-size: var(--fs-sm); }
+.run-history-sub { color: var(--fg-3); font-size: var(--fs-xs); }
+.run-history-list { list-style: none; margin: 0; padding: 0; }
+.run-history-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--hairline);
+}
+.run-history-row:last-child { border-bottom: none; }
+.run-history-status {
+  display: inline-block; padding: 2px 8px;
+  border-radius: var(--r-sm); font-size: var(--fs-xs); font-weight: 600;
+}
+.run-history-status.status-succeeded { background: rgba(34,197,94,0.15); color: #4ade80; }
+.run-history-status.status-failed { background: rgba(239,68,68,0.15); color: #f87171; }
+.run-history-status.status-cancelled { background: rgba(156,163,175,0.15); color: #9ca3af; }
+.run-history-status.status-running { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.run-history-when { font-size: var(--fs-xs); color: var(--fg-2); }
+.run-history-stats { font-size: var(--fs-xs); color: var(--fg-3); margin-top: 2px; }
+.run-history-copy {
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  color: var(--fg-1);
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  font: inherit; font-size: var(--fs-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.run-history-copy:hover { background: var(--surface-3); }
+.run-history-empty {
+  padding: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-md);
+  margin-top: var(--sp-3);
+}
+.run-history-empty.run-history-err { color: #f87171; border-color: rgba(239,68,68,0.4); }
+
+/* Inline blocker banner on home — surfaces critical issues (agent disabled,
+   missing key) that prevent scenario generation. Always visible, action button
+   inline. */
+.home-blocker-banner {
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  margin: var(--sp-4) 0;
+  border: 1px solid var(--st-warn-border);
+  background: var(--st-warn-bg);
+  border-radius: var(--r-md);
+  color: var(--st-warn-fg);
+}
+.home-blocker-icon { font-size: 18px; line-height: 1; padding-top: 2px; }
+.home-blocker-body { flex: 1; min-width: 0; }
+.home-blocker-title { font-weight: 600; font-size: var(--fs-sm); margin-bottom: 2px; }
+.home-blocker-msg { font-size: var(--fs-xs); opacity: 0.85; }
+.home-blocker-action {
+  align-self: center;
+  padding: 6px 12px;
+  border: 1px solid var(--st-warn-border);
+  background: var(--surface-1);
+  color: var(--st-warn-fg);
+  border-radius: var(--r-sm);
+  font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.home-blocker-action:hover { background: var(--surface-2); }
+
 /* Workspace warnings — yellow-triangle chip with red count.
    Click pops a stacked list of setup-gap notices. */
 .workspace-warn { position: relative; }
@@ -2345,16 +2430,20 @@ code {
 .path { font-family: ui-monospace, SFMono-Regular, monospace; word-break: break-all; }
 
 .method-badge {
-  font-family: ui-monospace, monospace; font-size: 0.75rem; font-weight: 700;
-  padding: 0.15rem 0.5rem; border-radius: 4px;
-  background: var(--code-bg); color: var(--fg);
-  letter-spacing: 0.02em;
+  font-family: ui-monospace, monospace; font-size: 0.7rem; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--surface-2); color: var(--fg-2);
+  border: 1px solid var(--hairline);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
 }
-.method-badge.method-get    { background: var(--method-get);    color: white; }
-.method-badge.method-post   { background: var(--method-post);   color: white; }
-.method-badge.method-put    { background: var(--method-put);    color: white; }
-.method-badge.method-delete { background: var(--method-delete); color: white; }
-.method-badge.method-patch  { background: var(--method-patch);  color: white; }
+/* Outline pastel: coloured text + matching border, transparent fill. Matches the side-rail
+ * Recent / Hot spots row look. */
+.method-badge.method-get    { color: var(--method-get);    border-color: var(--method-get); }
+.method-badge.method-post   { color: var(--method-post);   border-color: var(--method-post); }
+.method-badge.method-put    { color: var(--method-put);    border-color: var(--method-put); }
+.method-badge.method-delete { color: var(--method-delete); border-color: var(--method-delete); }
+.method-badge.method-patch  { color: var(--method-patch);  border-color: var(--method-patch); }
 
 .bp-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--st-warn-fg);
@@ -5787,11 +5876,16 @@ code {
 .sysmap-side-hint { margin: 0; font-size: var(--fs-xs); color: var(--fg-3); line-height: 1.5; }
 .sysmap-side-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; }
 .sysmap-side-row {
-  display: flex; align-items: center; gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px var(--sp-3);
   border-top: 1px solid var(--hairline);
   cursor: pointer;
   font-size: var(--fs-sm);
+  min-width: 0;
+}
+.sysmap-side-row .sysmap-side-label {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 auto; min-width: 0;
 }
 .sysmap-side-row:hover { background: var(--surface-2); }
 .sysmap-side-row.is-active { background: var(--surface-2); }
@@ -6180,3 +6274,502 @@ code {
   font-size: 0.7rem;
   font-weight: 600;
 }
+
+/* LayeredDrillDown — top-down tree view (replaces force-sim for large graphs) */
+.layered-drill { display: flex; flex-direction: column; height: 100%; min-height: 480px; background: var(--bg-1); }
+.layered-toolbar {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.layered-btn {
+  border: 1px solid var(--border-1); background: var(--bg-1); color: var(--fg-1);
+  padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+}
+.layered-btn:disabled { opacity: 0.5; cursor: default; }
+.layered-btn:hover:not(:disabled) { background: var(--bg-3); }
+.layered-node {
+  border: 1.5px solid; border-radius: 6px; background: var(--bg-1);
+  padding: 6px 10px; box-sizing: border-box; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+.layered-node.is-selected { box-shadow: 0 0 0 2px var(--accent-1, #3b82f6); }
+.layered-node-head { display: flex; align-items: center; gap: 6px; }
+.layered-node-kind {
+  color: white; font-size: 0.65rem; padding: 1px 6px; border-radius: 3px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.layered-node-toggle {
+  margin-left: auto; font-weight: 700; font-size: 0.95rem;
+  color: var(--fg-2);
+}
+.layered-node-label {
+  font-size: 0.78rem; font-weight: 500; color: var(--fg-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.layered-node-area { font-size: 0.65rem; color: var(--fg-3); }
+
+/* LayeredDrillDown layout — sidebar picker + focused canvas */
+.layered-drill { display: grid; grid-template-columns: 280px 1fr; height: 100%; min-height: 540px; background: var(--bg-1); }
+.layered-picker { display: flex; flex-direction: column; border-right: 1px solid var(--border-1); background: var(--bg-2); min-height: 0; }
+.layered-picker-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border-1);
+  font-size: 0.8rem;
+}
+.layered-picker-list {
+  flex: 1 1 auto; overflow-y: auto; padding: var(--sp-1);
+  display: flex; flex-direction: column; gap: 2px;
+  /* Keep scroll behaviour but hide the visible bar — picker has plenty of width
+   * and the bar's chrome competes with the endpoint labels. */
+  scrollbar-width: none; /* Firefox */
+}
+.layered-picker-list::-webkit-scrollbar { width: 0; height: 0; }
+.layered-picker-item {
+  /* Tight single-row layout — short method names fit comfortably without wrapping. */
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  padding: 5px 8px; background: transparent; border: 1px solid transparent;
+  border-radius: 4px; cursor: pointer; color: var(--fg-1); text-align: left;
+  min-width: 0; /* allow inner text-overflow to actually trim */
+}
+.layered-picker-item:hover { background: var(--bg-3); border-color: var(--border-1); }
+.layered-picker-item.is-active { background: var(--bg-3); border-color: var(--accent-1, #3b82f6); }
+.layered-picker-item .method-badge { flex-shrink: 0; }
+.layered-picker-label {
+  font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; flex: 1 1 auto;
+}
+.layered-picker-area {
+  font-size: 0.65rem; color: var(--fg-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 0 1 auto; max-width: 40%;
+}
+.layered-picker-empty { padding: var(--sp-3); }
+.layered-canvas { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.layered-focus-label { font-size: 0.85rem; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+.layered-empty {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--fg-2); gap: 8px;
+}
+
+/* LayeredDrillDown picker filters */
+.layered-picker-filters {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.layered-picker-search {
+  width: 100%; box-sizing: border-box;
+  padding: 5px 8px; font-size: 0.75rem;
+  background: var(--bg-1); color: var(--fg-1);
+  border: 1px solid var(--border-1); border-radius: 4px;
+}
+.layered-picker-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.layered-picker-select {
+  width: 100%; box-sizing: border-box;
+  padding: 4px 6px; font-size: 0.7rem;
+  background: var(--bg-1); color: var(--fg-1);
+  border: 1px solid var(--border-1); border-radius: 4px;
+  cursor: pointer;
+}
+.layered-picker-clear {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  background: transparent; color: var(--fg-3);
+  border: none; cursor: pointer; padding: 2px 0;
+  text-decoration: underline;
+}
+.layered-picker-clear:hover { color: var(--fg-1); }
+
+/* LayeredDrillDown — focus view toggle (Graph / Trace) */
+.layered-view-toggle {
+  display: inline-flex; border: 1px solid var(--border-1); border-radius: 4px; overflow: hidden;
+  margin-left: var(--sp-2);
+}
+.layered-view-btn {
+  padding: 4px 10px; font-size: 0.75rem;
+  background: var(--bg-1); color: var(--fg-2);
+  border: none; border-right: 1px solid var(--border-1);
+  cursor: pointer;
+}
+.layered-view-btn:last-child { border-right: none; }
+.layered-view-btn:disabled { opacity: 0.4; cursor: default; }
+.layered-view-btn.is-active { background: var(--accent-1, #3b82f6); color: white; }
+.layered-view-btn:hover:not(:disabled):not(.is-active) { background: var(--bg-3); color: var(--fg-1); }
+.layered-trace { flex: 1 1 auto; overflow: auto; padding: var(--sp-3); background: var(--bg-1); }
+
+/* LayeredDrillDown — summary + source-aware node decoration */
+.layered-node.has-summary { padding-bottom: 8px; }
+.layered-node-summary {
+  font-size: 0.7rem; color: var(--fg-2);
+  line-height: 1.3;
+  max-height: 2.6em; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  margin-top: 2px;
+}
+.layered-node-src {
+  margin-left: 4px; font-size: 0.7rem; color: var(--fg-3);
+  cursor: help;
+}
+
+/* SourceDrawer — Rider-dark feel, solid (no transparency over canvas).
+ * Backdrop is transparent and non-blocking: canvas behind stays readable + interactive so
+ * the user can see which node the drawer is reading from. Close happens via Esc / × button. */
+.source-drawer-backdrop {
+  position: fixed; inset: 0; background: transparent; z-index: 70;
+  pointer-events: none;
+}
+.source-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(820px, 80vw);
+  background: #1e1f22; /* Rider Darcula editor bg */
+  color: #bcbec4;
+  border-left: 1px solid #2b2d30;
+  z-index: 71; display: flex; flex-direction: column; min-height: 0;
+  box-shadow: -8px 0 24px rgba(0,0,0,0.5);
+}
+.source-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-3); border-bottom: 1px solid #2b2d30;
+  background: #2b2d30; /* darker top bar like Rider tabs */
+}
+.source-drawer-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: #dfe1e5; }
+.source-drawer-title strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-drawer-close {
+  background: transparent; color: #9da0a8; border: none;
+  font-size: 1.3rem; cursor: pointer; padding: 0 6px;
+}
+.source-drawer-close:hover { color: #fff; }
+.source-drawer-body { flex: 1 1 auto; overflow: auto; padding: 0; background: #1e1f22; }
+.source-drawer-path { padding: 6px var(--sp-3); border-bottom: 1px solid #2b2d30; color: #7f8389; word-break: break-all; background: #1e1f22; }
+.source-drawer-pre {
+  margin: 0; padding: 8px 0;
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.82rem; line-height: 1.45;
+  background: #1e1f22; color: #bcbec4;
+}
+.source-line {
+  display: flex; gap: 12px; padding: 0 var(--sp-3);
+  white-space: pre;
+}
+.source-line.is-focus { background: rgba(99,102,241,0.18); box-shadow: inset 2px 0 0 #6366f1; }
+/* Dim non-method lines so the eye lands on the method body the drawer was opened for. */
+.source-line.is-dim { opacity: 0.55; }
+.source-line.is-dim .token { filter: saturate(0.6); }
+/* Full-width tint that starts at the line gutter so the highlight covers the gutter too. */
+.source-line.is-in-method {
+  background: rgba(86, 168, 245, 0.12);
+  box-shadow: inset 2px 0 0 rgba(86, 168, 245, 0.4);
+}
+.source-line.is-method-start {
+  background: rgba(86, 168, 245, 0.22);
+  box-shadow: inset 3px 0 0 #56a8f5;
+}
+.source-line.is-in-method .source-line-num { color: #7f8389; }
+.source-line-num {
+  color: #4e5157; min-width: 3em; text-align: right; user-select: none;
+  flex-shrink: 0;
+}
+.source-line-text { color: #bcbec4; }
+.source-drawer-empty { padding: var(--sp-4); color: #9da0a8; }
+.source-drawer-empty.error { color: #ef6e72; }
+
+/* Prism — Rider Darcula token palette (scoped to drawer + inline snippet) */
+.source-drawer-pre .token.comment,
+.source-drawer-pre .token.prolog,
+.source-drawer-pre .token.doctype,
+.source-drawer-pre .token.cdata,
+.layered-node-snippet .token.comment { color: #7a7e85; font-style: italic; }
+.source-drawer-pre .token.punctuation,
+.layered-node-snippet .token.punctuation { color: #bcbec4; }
+.source-drawer-pre .token.keyword,
+.source-drawer-pre .token.builtin,
+.layered-node-snippet .token.keyword,
+.layered-node-snippet .token.builtin { color: #cf8e6d; }
+.source-drawer-pre .token.boolean,
+.source-drawer-pre .token.number,
+.layered-node-snippet .token.boolean,
+.layered-node-snippet .token.number { color: #2aacb8; }
+.source-drawer-pre .token.string,
+.source-drawer-pre .token.char,
+.layered-node-snippet .token.string,
+.layered-node-snippet .token.char { color: #6aab73; }
+.source-drawer-pre .token.class-name,
+.source-drawer-pre .token.generic-method .token.function,
+.layered-node-snippet .token.class-name { color: #bcbec4; font-weight: 500; }
+.source-drawer-pre .token.function,
+.layered-node-snippet .token.function { color: #56a8f5; }
+.source-drawer-pre .token.operator,
+.layered-node-snippet .token.operator { color: #bcbec4; }
+.source-drawer-pre .token.preprocessor,
+.layered-node-snippet .token.preprocessor { color: #b8a36e; }
+.source-drawer-pre .token.attribute,
+.layered-node-snippet .token.attribute { color: #b6a0d8; }
+.source-drawer-pre .token.namespace,
+.layered-node-snippet .token.namespace { color: #bcbec4; opacity: 0.85; }
+.source-drawer-pre .token.regex,
+.layered-node-snippet .token.regex { color: #cf8e6d; }
+.source-drawer-pre .token.tag,
+.layered-node-snippet .token.tag { color: #6aab73; }
+
+/* LayeredDrillDown — floating context menu pinned to cursor */
+.layered-ctxmenu {
+  position: fixed; z-index: 80;
+  min-width: 180px;
+  background: var(--bg-2); color: var(--fg-1);
+  border: 1px solid var(--border-1); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  padding: 4px 0; font-size: 0.8rem;
+}
+.layered-ctxmenu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 6px 12px;
+  background: transparent; color: inherit; border: none; text-align: left;
+  cursor: pointer; font-size: inherit;
+}
+.layered-ctxmenu-item:hover:not(:disabled) { background: var(--bg-3); }
+.layered-ctxmenu-item:disabled { opacity: 0.45; cursor: default; }
+.layered-ctxmenu-icon { width: 14px; text-align: center; color: var(--fg-3); }
+
+/* LayeredDrillDown — left summary bubble + IL signal chips */
+.layered-node-wrap { position: relative; }
+.layered-summary-bubble {
+  position: absolute; right: calc(100% + 12px); top: 8px;
+  width: 200px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.7rem; color: var(--fg-1); line-height: 1.35;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  pointer-events: auto;
+  z-index: 1;
+}
+.layered-summary-bubble::after {
+  content: ''; position: absolute;
+  right: -7px; top: 14px;
+  width: 0; height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 7px solid var(--border-1);
+}
+.layered-summary-bubble::before {
+  content: ''; position: absolute;
+  right: -6px; top: 14px;
+  width: 0; height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 7px solid var(--bg-2);
+  z-index: 1;
+}
+.layered-summary-icon { margin-right: 4px; opacity: 0.7; }
+.layered-summary-text { color: var(--fg-1); }
+
+.layered-node-signals {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.sig {
+  font-size: 0.65rem; padding: 1px 6px; border-radius: 3px;
+  background: var(--bg-3); color: var(--fg-2); border: 1px solid var(--border-1);
+  white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+}
+.sig-throw { background: rgba(239,68,68,0.15); color: #fca5a5; border-color: rgba(239,68,68,0.35); }
+.sig-branch { background: rgba(245,158,11,0.15); color: #fcd34d; border-color: rgba(245,158,11,0.35); }
+.sig-log { background: rgba(59,130,246,0.15); color: #93c5fd; border-color: rgba(59,130,246,0.35); }
+
+/* LayeredDrillDown — inline source snippet (primary content) */
+.layered-node-snippet {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  line-height: 1.3;
+  padding: 5px 7px;
+  margin: 4px -2px 0;
+  background: #1e1f22; /* match Rider drawer */
+  border-top: 1px solid #2b2d30;
+  border-radius: 3px;
+  white-space: pre;
+  overflow: hidden;
+  max-height: 110px;
+  color: #bcbec4;
+  cursor: pointer;
+}
+.layered-node-snippet:hover { background: #232427; }
+.layered-node-snippet-more {
+  font-size: 0.62rem;
+  background: none; border: none;
+  color: #60a5fa; cursor: pointer;
+  padding: 2px 4px 0;
+  text-align: left;
+  align-self: flex-start;
+}
+.layered-node-snippet-more:hover { text-decoration: underline; }
+/* dim signals when snippet present so source is primary */
+.layered-node.has-snippet .layered-node-signals { font-size: 0.6rem; opacity: 0.7; margin-top: 2px; }
+
+/* Drawer jump bar — inline chips for method calls discovered inside the open method body */
+.source-drawer-jumps {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px var(--sp-3);
+  background: #2b2d30;
+  border-bottom: 1px solid #1e1f22;
+}
+.source-drawer-jumps .muted { color: #9da0a8; margin-right: 4px; }
+.source-drawer-jump {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-size: 0.72rem;
+  background: #1e1f22; color: #56a8f5;
+  border: 1px solid #3b3d41; border-radius: 4px;
+  padding: 2px 8px; cursor: pointer;
+  white-space: nowrap;
+}
+.source-drawer-jump:hover { background: #2d3138; color: #93c5fd; border-color: #56a8f5; }
+
+/* Drawer source: function-name tokens are clickable (jump to that method's drawer view). */
+.source-drawer-pre .token.function,
+.source-drawer-pre .token.class-name {
+  cursor: pointer;
+}
+.source-drawer-pre .token.function:hover,
+.source-drawer-pre .token.class-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  filter: brightness(1.15);
+}
+
+/* Drawer back button (left of title) */
+.source-drawer-back {
+  background: transparent; color: #9da0a8; border: 1px solid transparent;
+  font-size: 1rem; cursor: pointer; padding: 2px 8px; border-radius: 4px;
+  margin-right: 8px;
+}
+.source-drawer-back:hover:not(:disabled) {
+  color: #56a8f5; border-color: #3b3d41; background: #1e1f22;
+}
+.source-drawer-back:disabled { opacity: 0.3; cursor: default; }
+
+/* SysMap side rail — collapsible sections (Recent / Hot spots / No service call) */
+.sysmap-side-head {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 10px;
+  background: transparent; color: var(--fg-1); border: none;
+  font-size: 0.78rem; font-weight: 600;
+  cursor: pointer; text-align: left;
+  border-bottom: 1px solid var(--border-1);
+}
+.sysmap-side-head:hover { background: var(--bg-3); }
+.sysmap-side-caret { color: var(--fg-3); font-size: 0.7rem; }
+.sysmap-side-count {
+  margin-left: auto;
+  font-size: 0.65rem; color: var(--fg-3);
+  background: var(--bg-3); padding: 1px 6px; border-radius: 8px;
+}
+.sysmap-side-body { padding: 4px 0; }
+
+/* Drawer-active focus: when SourceDrawer is open, the matching canvas node glows; everyone
+ * else dims so the visual link between right-pane source and left-pane node is obvious. */
+.layered-node.is-drawer-active {
+  box-shadow: 0 0 0 2px #56a8f5, 0 4px 20px rgba(86, 168, 245, 0.45);
+  transform: scale(1.04);
+  z-index: 2;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+.layered-node.is-drawer-dim {
+  opacity: 0.35;
+  transition: opacity 0.25s ease;
+}
+.layered-node.is-drawer-dim:hover { opacity: 0.7; }
+
+/* Reverse-mode picker: group an interface entry with its impl + called methods. */
+.layered-picker-group { display: flex; flex-direction: column; gap: 1px; }
+.layered-picker-group-head .layered-picker-caret {
+  width: 12px; font-size: 0.65rem; color: var(--fg-3);
+  cursor: pointer; user-select: none;
+}
+.layered-picker-group-head .layered-picker-caret:hover { color: var(--fg-1); }
+.layered-picker-group-body {
+  margin-left: 16px;
+  border-left: 1px dashed var(--border-1);
+  padding-left: 4px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.layered-picker-subitem,
+.layered-picker-method {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px; font-size: 0.72rem;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 3px; color: var(--fg-1); cursor: pointer;
+}
+.layered-picker-method { cursor: default; color: var(--fg-2); }
+.layered-picker-subitem:hover { background: var(--bg-3); border-color: var(--border-1); }
+.layered-picker-subitem.is-active { background: var(--bg-3); border-color: var(--accent-1, #3b82f6); }
+.layered-picker-sub-tag {
+  font-family: ui-monospace, monospace;
+  font-size: 0.6rem; letter-spacing: 0.04em;
+  padding: 0 5px; border-radius: 3px;
+  color: var(--fg-3); border: 1px solid var(--border-1);
+  background: var(--surface-2);
+}
+.layered-picker-sub-empty { padding: 4px 8px; }
+
+/* Reverse-mode source grep panel — overlay on top of the canvas when toggled. */
+.layered-grep-panel {
+  position: absolute; right: 12px; top: 56px; bottom: 12px;
+  width: min(520px, 45vw);
+  background: #1e1f22;
+  border: 1px solid #2b2d30;
+  border-radius: 6px;
+  display: flex; flex-direction: column;
+  z-index: 5;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+.layered-grep-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2b2d30;
+  background: #2b2d30;
+  font-size: 0.78rem;
+}
+.layered-grep-head .muted { margin-left: auto; }
+.layered-grep-body { flex: 1 1 auto; overflow: auto; }
+.layered-grep-empty { padding: 16px; }
+.layered-grep-row {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 4px 10px;
+  background: transparent; border: none; color: #bcbec4;
+  text-align: left; cursor: pointer;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  border-bottom: 1px solid rgba(43, 45, 48, 0.5);
+}
+.layered-grep-row:hover { background: #232427; }
+.layered-grep-file { color: #56a8f5; flex-shrink: 0; }
+.layered-grep-line { color: #7a7e85; flex-shrink: 0; }
+.layered-grep-preview {
+  color: #bcbec4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 auto; min-width: 0;
+}
+
+/* Grep panel — file-grouped tree */
+.layered-grep-group { display: flex; flex-direction: column; }
+.layered-grep-group.is-api .layered-grep-group-head { background: rgba(86, 168, 245, 0.08); }
+.layered-grep-group-head {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 10px;
+  background: transparent; color: #bcbec4; border: none;
+  text-align: left; cursor: pointer;
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.74rem;
+  border-bottom: 1px solid rgba(43, 45, 48, 0.5);
+}
+.layered-grep-group-head:hover { background: #232427; }
+.layered-grep-group.is-api .layered-grep-group-head:hover { background: rgba(86, 168, 245, 0.15); }
+.layered-grep-caret { color: #7a7e85; font-size: 0.65rem; width: 12px; }
+.layered-grep-count {
+  margin-left: auto;
+  font-size: 0.62rem; color: #9da0a8;
+  background: #2b2d30; border-radius: 8px; padding: 1px 6px;
+}
+.layered-grep-group-body { background: #16171a; }
+.layered-grep-group-body .layered-grep-row { padding-left: 30px; }

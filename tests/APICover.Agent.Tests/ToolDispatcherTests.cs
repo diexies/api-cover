@@ -10,7 +10,7 @@ public class ToolDispatcherTests
     [Fact]
     public async Task ListEndpoints_ReturnsAll_WhenNoFilter()
     {
-        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore());
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
 
         var result = await dispatcher.DispatchAsync(ToolRegistry.ListEndpoints, null, default);
 
@@ -21,7 +21,7 @@ public class ToolDispatcherTests
     [Fact]
     public async Task ListEndpoints_FiltersByMethod()
     {
-        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore());
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
         var input = new JsonObject { ["methodFilter"] = "POST" };
 
         var result = await dispatcher.DispatchAsync(ToolRegistry.ListEndpoints, input, default);
@@ -35,7 +35,7 @@ public class ToolDispatcherTests
     [Fact]
     public async Task GetEndpointDetails_ReturnsFullDescriptor()
     {
-        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore());
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
         var input = new JsonObject { ["id"] = "POST /users" };
 
         var result = await dispatcher.DispatchAsync(ToolRegistry.GetEndpointDetails, input, default);
@@ -48,7 +48,7 @@ public class ToolDispatcherTests
     [Fact]
     public async Task GetEndpointDetails_ReturnsErrorJson_ForUnknownId()
     {
-        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore());
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
         var input = new JsonObject { ["id"] = "GET /nonexistent" };
 
         var result = await dispatcher.DispatchAsync(ToolRegistry.GetEndpointDetails, input, default);
@@ -60,7 +60,7 @@ public class ToolDispatcherTests
     [Fact]
     public async Task UnknownTool_ReturnsErrorResult()
     {
-        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore());
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
 
         var result = await dispatcher.DispatchAsync("invent_scenarios_for_me", null, default);
 
@@ -70,7 +70,7 @@ public class ToolDispatcherTests
     [Fact]
     public async Task GetEndpointDetails_ThrowsCapturedAsError_WhenIdMissing()
     {
-        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore());
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
 
         var result = await dispatcher.DispatchAsync(ToolRegistry.GetEndpointDetails, new JsonObject(), default);
 

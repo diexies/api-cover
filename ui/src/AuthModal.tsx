@@ -32,7 +32,7 @@ export function AuthModal({ initial, onSave, onClose }: Props) {
   return (
     <>
       <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel" role="dialog" aria-label="Authorization">
+      <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Authorization">
         <div className="modal-head">
           <h3>Authorization</h3>
           <button className="close-btn" onClick={onClose}>×</button>

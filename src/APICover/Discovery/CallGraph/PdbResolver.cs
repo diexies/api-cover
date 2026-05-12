@@ -55,6 +55,50 @@ internal sealed class PdbResolver
         }
     }
 
+    /// <summary>Resolve the source file and inclusive line range that the method body spans.
+    /// Used to slice the first few lines for inline source previews. Returns
+    /// <c>(null, null, null)</c> when no portable PDB is available or sequence points are
+    /// missing / all hidden.</summary>
+    public (string? FilePath, int? StartLine, int? EndLine) TryResolveRange(MethodBase method)
+    {
+        try
+        {
+            var asm = method.Module.Assembly;
+            if (asm.IsDynamic) return (null, null, null);
+            var asmKey = asm.Location;
+            if (string.IsNullOrEmpty(asmKey)) return (null, null, null);
+
+            var provider = _readerByAssembly.GetOrAdd(asmKey, OpenPdb);
+            if (provider is null) return (null, null, null);
+
+            var reader = provider.GetMetadataReader();
+            var rowToken = method.MetadataToken;
+            var rowId = rowToken & 0x00FFFFFF;
+            var handle = MetadataTokens.MethodDebugInformationHandle(rowId);
+            if (handle.IsNil) return (null, null, null);
+
+            var dbg = reader.GetMethodDebugInformation(handle);
+            if (dbg.SequencePointsBlob.IsNil) return (null, null, null);
+
+            string? bestFile = null;
+            int minStart = int.MaxValue;
+            int maxEnd = int.MinValue;
+            foreach (var sp in dbg.GetSequencePoints())
+            {
+                if (sp.IsHidden) continue;
+                bestFile ??= reader.GetString(reader.GetDocument(sp.Document).Name);
+                if (sp.StartLine < minStart) minStart = sp.StartLine;
+                if (sp.EndLine > maxEnd) maxEnd = sp.EndLine;
+            }
+            if (bestFile is null || minStart == int.MaxValue) return (null, null, null);
+            return (bestFile, minStart, maxEnd == int.MinValue ? minStart : maxEnd);
+        }
+        catch
+        {
+            return (null, null, null);
+        }
+    }
+
     private static MetadataReaderProvider? OpenPdb(string assemblyPath)
     {
         try

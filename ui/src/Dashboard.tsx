@@ -85,7 +85,7 @@ interface HomeSectionProps {
   onSendPrompt: (text: string, mode?: string | null) => void;
 }
 
-const KNOWN_MODES = new Set(['scenario', 'scan', 'explain', 'map']);
+const KNOWN_MODES = new Set(['scenario', 'discover', 'scan', 'explain', 'map']);
 
 function HomeSection({
   endpoints, scenarios, agentEnabled, agentStatus, auth,
@@ -160,16 +160,16 @@ function HomeSection({
   } else if (agentStatus.mode === 'Disabled') {
     warnings.push({
       id: 'agent-disabled',
-      title: 'AI mode disabled',
-      message: 'Pick API key or Max in agent settings — the chat composer and scan need credentials before they can run.',
+      title: 'AI mode disabled — scenarios cannot be generated',
+      message: 'Auto-discovery, /scenario and /discover all need credentials. Pick "Max" (subscription detected) or paste an API key in agent settings.',
       actionLabel: 'open settings',
       actionTab: 'agent',
     });
   } else if (agentStatus.mode === 'ApiKey' && !agentStatus.hasApiKey) {
     warnings.push({
       id: 'agent-key-missing',
-      title: 'Anthropic API key missing',
-      message: 'Agent is set to API key mode but no key is saved yet. Paste a key into Agent settings to enable runs.',
+      title: 'Anthropic API key missing — scenarios cannot be generated',
+      message: 'Agent is set to API key mode but no key is saved yet. Paste a key into Agent settings to unblock /scenario, /discover and auto-discovery.',
       actionLabel: 'open settings',
       actionTab: 'agent',
     });
@@ -195,6 +195,31 @@ function HomeSection({
           onOpenGlobalSettings={onOpenGlobalSettings}
         />
       )}
+
+      {(() => {
+        const blocker = warnings.find((w) =>
+          w.id === 'agent-disabled' || w.id === 'agent-key-missing' || w.id === 'agent-missing'
+        );
+        if (!blocker) return null;
+        return (
+          <div className="home-blocker-banner" role="alert">
+            <span className="home-blocker-icon" aria-hidden="true">⚠</span>
+            <div className="home-blocker-body">
+              <div className="home-blocker-title">{blocker.title}</div>
+              <div className="home-blocker-msg">{blocker.message}</div>
+            </div>
+            {blocker.actionLabel && blocker.actionTab && (
+              <button
+                type="button"
+                className="home-blocker-action"
+                onClick={() => onOpenGlobalSettings(blocker.actionTab)}
+              >
+                {blocker.actionLabel}
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {agentEnabled && (
         <>

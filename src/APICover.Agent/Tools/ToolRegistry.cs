@@ -16,6 +16,7 @@ public static class ToolRegistry
     public const string WriteMemory = "write_memory";
     public const string AppendMemory = "append_memory";
     public const string DeleteMemory = "delete_memory";
+    public const string SaveScenario = "save_scenario";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
 
@@ -151,6 +152,38 @@ public static class ToolRegistry
                   "required": ["path"],
                   "properties": {
                     "path": { "type": "string" }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = SaveScenario,
+                Description =
+                    "Persist a complete Scenario JSON document so the user can run it. "
+                  + "Use this only in scenario-generation mode after you have called "
+                  + "list_endpoints and get_endpoint_details and have a complete DAG. "
+                  + "Returns {ok:true,id,nodeCount,edgeCount} on success, or "
+                  + "{ok:false,errors:[...]} when validation fails — read the errors, "
+                  + "fix the JSON, and call again (max 3 retries). "
+                  + "Required shape: { id (^[a-z0-9-]+$), name, nodes:[{id,method,path,body?,"
+                  + "pathParameters?,queryParameters?,headers?}], edges:[{from,to,condition?}], "
+                  + "description?, tags?, startNodeIds?, caseSets?, groups?, breakpoints? }. "
+                  + "Example: {\"id\":\"login-flow\",\"name\":\"Login flow\","
+                  + "\"nodes\":[{\"id\":\"login\",\"method\":\"POST\",\"path\":\"/api/auth/login\","
+                  + "\"body\":{\"user\":\"a\",\"pass\":\"b\"}},"
+                  + "{\"id\":\"profile\",\"method\":\"GET\",\"path\":\"/api/me\"}],"
+                  + "\"edges\":[{\"from\":\"login\",\"to\":\"profile\"}],"
+                  + "\"startNodeIds\":[\"login\"]}",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["scenario"],
+                  "properties": {
+                    "scenario": {
+                      "type": "object",
+                      "description": "Full Scenario JSON document. See tool description for shape and example."
+                    }
                   }
                 }
                 """)!

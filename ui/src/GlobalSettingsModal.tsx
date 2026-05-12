@@ -62,7 +62,7 @@ export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose, agentSta
   return (
     <>
       <div className="modal-backdrop blurred" onClick={onClose} />
-      <div className="modal-centered global-settings" role="dialog" aria-label="Global settings" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-centered global-settings" role="dialog" aria-modal="true" aria-label="Global settings" onClick={(e) => e.stopPropagation()}>
         <header className="gs-head">
           <div className="gs-head-title">
             <h3>Global Settings</h3>

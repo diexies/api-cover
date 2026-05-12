@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using APICover.Abstractions.Discovery;
+using APICover.Abstractions.Models;
+using APICover.Abstractions.Services;
+using APICover.Abstractions.Validation;
 using APICover.Agent.Memory;
 
 namespace APICover.Agent.Tools;
@@ -14,11 +17,18 @@ public sealed class ToolDispatcher
 {
     private readonly IEndpointDiscoveryService _discovery;
     private readonly IAgentMemoryStore _memory;
+    private readonly IScenarioStore _scenarios;
 
-    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory)
+    private static readonly JsonSerializerOptions ScenarioJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory, IScenarioStore scenarios)
     {
         _discovery = discovery;
         _memory = memory;
+        _scenarios = scenarios;
     }
 
     public async Task<ToolResult> DispatchAsync(string toolName, JsonNode? input, CancellationToken cancellationToken)
@@ -34,6 +44,7 @@ public sealed class ToolDispatcher
                 ToolRegistry.WriteMemory => await HandleWriteMemoryAsync(input, cancellationToken),
                 ToolRegistry.AppendMemory => await HandleAppendMemoryAsync(input, cancellationToken),
                 ToolRegistry.DeleteMemory => await HandleDeleteMemoryAsync(input, cancellationToken),
+                ToolRegistry.SaveScenario => await HandleSaveScenarioAsync(input, cancellationToken),
                 _ => null
             };
 
@@ -184,6 +195,62 @@ public sealed class ToolDispatcher
             ?? throw new ArgumentException("Required field 'path' is missing.");
         await _memory.DeleteAsync(path, ct);
         return new JsonObject { ["ok"] = true, ["path"] = path };
+    }
+
+    private async Task<JsonNode> HandleSaveScenarioAsync(JsonNode? input, CancellationToken ct)
+    {
+        var payload = input?["scenario"];
+        if (payload is null)
+        {
+            return new JsonObject
+            {
+                ["ok"] = false,
+                ["errors"] = new JsonArray { JsonValue.Create("Required field 'scenario' is missing.") }
+            };
+        }
+
+        Scenario? parsed;
+        try
+        {
+            parsed = payload.Deserialize<Scenario>(ScenarioJsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            return new JsonObject
+            {
+                ["ok"] = false,
+                ["errors"] = new JsonArray { JsonValue.Create($"scenario JSON is malformed: {ex.Message}") }
+            };
+        }
+
+        if (parsed is null)
+        {
+            return new JsonObject
+            {
+                ["ok"] = false,
+                ["errors"] = new JsonArray { JsonValue.Create("scenario payload deserialised to null.") }
+            };
+        }
+
+        var validation = ScenarioValidator.Validate(parsed);
+        if (!validation.IsValid)
+        {
+            var errs = new JsonArray();
+            foreach (var e in validation.Errors)
+            {
+                errs.Add(JsonValue.Create(e));
+            }
+            return new JsonObject { ["ok"] = false, ["errors"] = errs };
+        }
+
+        await _scenarios.SaveAsync(parsed, ct);
+        return new JsonObject
+        {
+            ["ok"] = true,
+            ["id"] = parsed.Id,
+            ["nodeCount"] = parsed.Nodes.Count,
+            ["edgeCount"] = parsed.Edges.Count
+        };
     }
 }
 

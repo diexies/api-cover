@@ -261,6 +261,20 @@ internal sealed class ServiceMapBuilder : IServiceMapService
                     foreach (var c in node.Calls) VisitChild(c, callerId, nodes, edges);
                     return;
                 }
+                // Pass-through hubs: MediatR.ISender / IMediator / IPublisher are dispatch
+                // shims, not real dependencies. Emitting an edge to ISender pulls every
+                // handler in the system under one node (fan-out 200+) the moment any
+                // endpoint that hops through Mediator is rendered. Bypass ISender so the
+                // call goes directly to the resolved handler, which is what the user
+                // actually depends on. Same for shared logger / cache facades.
+                if (IsPassThroughHub(declaring) && node.ResolvedImplType is { Length: > 0 } hubImpl)
+                {
+                    EnsureServiceNode(nodes, hubImpl, isInterface: false, resolvedImpl: null);
+                    AddEdge(edges, callerId, hubImpl, MapEdgeKindForCaller(callerId, nodes));
+                    foreach (var c in node.Calls) VisitChild(c, hubImpl, nodes, edges);
+                    return;
+                }
+
                 EnsureServiceNode(nodes, declaring, isInterface: true, resolvedImpl: node.ResolvedImplType);
                 AddEdge(edges, callerId, declaring, MapEdgeKindForCaller(callerId, nodes));
                 // Promote the resolved concrete impl to its own service node and emit
@@ -327,6 +341,21 @@ internal sealed class ServiceMapBuilder : IServiceMapService
                 return;
             }
         }
+    }
+
+    /// <summary>Interfaces that act as pass-through dispatch shims rather than real
+    /// dependencies. Used by VisitChild to skip the shim node and emit a direct edge
+    /// from the caller to the resolved implementation — keeps shared hubs from pulling
+    /// every consumer into one ball.</summary>
+    private static bool IsPassThroughHub(string declaringType)
+    {
+        return declaringType switch
+        {
+            "MediatR.ISender" => true,
+            "MediatR.IMediator" => true,
+            "MediatR.IPublisher" => true,
+            _ => false
+        };
     }
 
     private static ServiceMapEdgeKind MapEdgeKindForCaller(string callerId, Dictionary<string, MutableNode> nodes)

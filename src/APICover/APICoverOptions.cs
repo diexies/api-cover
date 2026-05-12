@@ -17,6 +17,15 @@ public sealed class APICoverOptions
     /// </summary>
     public string PathPrefix { get; set; } = "/apicover";
 
+    /// <summary>Filesystem root for persisted per-scenario run history (last 10 terminal runs).
+    /// Null falls back to <c>{ContentRoot}/docs/apicover-history</c>.</summary>
+    public string? RunHistoryRoot { get; set; }
+
+    /// <summary>Filesystem root for persisted scenarios. Null falls back to
+    /// <c>{ContentRoot}/docs/apicover-scenarios</c>. Each scenario lives at
+    /// <c>{ScenarioRoot}/{id}.json</c> and survives process restarts.</summary>
+    public string? ScenarioRoot { get; set; }
+
     /// <summary>
     /// Maximum time the engine waits for a paused breakpoint to be resolved before failing the
     /// node. Defaults to 30 minutes.
@@ -64,6 +73,17 @@ public sealed class CallGraphInspectionOptions
         "Microsoft.AspNetCore.",
         "Microsoft.EntityFrameworkCore.",
         "Microsoft.Data.",
+        "Newtonsoft.Json",
+        "System.Text.Json",
+        "AutoMapper",
+        "FluentValidation",
+        "Hangfire",
+        // Do NOT exclude "MediatR" — the walker hops through Mediator.Send into the registered
+        // handler's Handle method (see TryFollowMediator). Excluding it would cut every CQRS
+        // path at the dispatcher boundary.
+        "Polly",
+        "Serilog",
+        "StackExchange.Redis",
     };
 
     /// <summary>If non-empty, restricts the walker to recursing only into methods declared in

@@ -1,4 +1,5 @@
 import { type NodeProps } from '@xyflow/react';
+import { memo } from 'react';
 import { hexToRgba } from './colors';
 
 export interface CaseAreaData extends Record<string, unknown> {
@@ -7,7 +8,7 @@ export interface CaseAreaData extends Record<string, unknown> {
   variantCount?: number;
 }
 
-export function CaseAreaNode({ data }: NodeProps & { data: CaseAreaData }) {
+function CaseAreaNodeImpl({ data }: NodeProps & { data: CaseAreaData }) {
   const tint = data.color ?? '#a855f7';
   const bg = hexToRgba(tint, 0.06);
   return (
@@ -22,3 +23,5 @@ export function CaseAreaNode({ data }: NodeProps & { data: CaseAreaData }) {
     </div>
   );
 }
+
+export const CaseAreaNode = memo(CaseAreaNodeImpl);
