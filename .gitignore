@@ -37,3 +37,6 @@ secrets.json
 
 # TypeScript
 *.tsbuildinfo
+
+# Local nuget packages
+nupkgs/
