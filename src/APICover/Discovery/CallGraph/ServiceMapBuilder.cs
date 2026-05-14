@@ -369,6 +369,10 @@ internal sealed class ServiceMapBuilder : IServiceMapService
         bool isInterface,
         string? resolvedImpl)
     {
+        // Skip data carriers: DTOs, view-models, request/response bags, entities, contracts.
+        // They're not services — surfacing them as service nodes pollutes the map.
+        if (IsDataCarrierType(declaringType)) return;
+
         if (nodes.TryGetValue(declaringType, out var existing))
         {
             if (existing.Kind != ServiceMapNodeKind.Service) return;
@@ -386,6 +390,50 @@ internal sealed class ServiceMapBuilder : IServiceMapService
             IsInterface = isInterface,
             ResolvedImplType = resolvedImpl
         };
+    }
+
+    /// <summary>
+    /// Heuristic: classify a fully-qualified type name as a data carrier (DTO / VM / request /
+    /// response / entity / contract) so the service map walker skips it. Looks at both the simple
+    /// name suffix and namespace conventions used across the PVC modules.
+    /// </summary>
+    internal static bool IsDataCarrierType(string fullName)
+    {
+        if (string.IsNullOrEmpty(fullName)) return false;
+        // Malformed assembly-qualified or generic-arity leak (e.g. "Foo`1[[T, Asm,
+        // Version=…, Culture=neutral, PublicKeyToken=…]]"). Not a real service either.
+        if (fullName.Contains("Culture=", StringComparison.Ordinal) ||
+            fullName.Contains("PublicKeyToken=", StringComparison.Ordinal) ||
+            fullName.Contains("Version=", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        var simple = ShortName(fullName);
+        if (EndsWithAny(simple, "Dto", "Dtos", "ViewModel", "VM", "Request", "Response",
+            "Command", "Query", "Event", "Payload", "Entity", "Model", "Options"))
+        {
+            return true;
+        }
+        // Namespace conventions.
+        if (fullName.Contains(".Dtos.", StringComparison.Ordinal) ||
+            fullName.Contains(".Dto.", StringComparison.Ordinal) ||
+            fullName.Contains(".Contracts.Dtos", StringComparison.Ordinal) ||
+            fullName.Contains(".ViewModels.", StringComparison.Ordinal) ||
+            fullName.Contains(".Entities.", StringComparison.Ordinal) ||
+            fullName.Contains(".Models.", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    private static bool EndsWithAny(string s, params string[] suffixes)
+    {
+        foreach (var suf in suffixes)
+        {
+            if (s.EndsWith(suf, StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 
     private static void EnsureBoundaryNode(

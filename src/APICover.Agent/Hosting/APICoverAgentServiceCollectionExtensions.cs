@@ -59,6 +59,7 @@ public static class APICoverAgentServiceCollectionExtensions
         services.TryAddSingleton<IAgentMemoryStore, FilesystemAgentMemoryStore>();
         services.TryAddSingleton<MemoryBootstrap>();
         services.TryAddSingleton<IAgentSessionStore, FilesystemAgentSessionStore>();
+        services.TryAddSingleton<ICustomToolInvoker, CustomToolInvoker>();
         services.TryAddSingleton<ToolDispatcher>();
         services.TryAddSingleton<IAgentRunStore, InMemoryAgentRunStore>();
         services.TryAddSingleton<AgentBudgetTracker>();

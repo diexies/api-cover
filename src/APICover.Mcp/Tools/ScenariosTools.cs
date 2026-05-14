@@ -11,7 +11,7 @@ namespace APICover.Mcp.Tools;
 public static class ScenariosTools
 {
     [McpServerTool(Name = "scenarios.list")]
-    [Description("List all scenarios as id+name+nodeCount summaries.")]
+    [Description("WHEN: user asks what scenarios exist, or before authoring to avoid duplicates.\n\nList all scenarios as id+name+nodeCount summaries.")]
     public static async Task<object> List(IScenarioStore store, CancellationToken ct)
     {
         var scenarios = await store.ListAsync(ct);
@@ -28,7 +28,7 @@ public static class ScenariosTools
     }
 
     [McpServerTool(Name = "scenarios.get")]
-    [Description("Fetch the full Scenario document by id, including nodes, edges, breakpoints and groups.")]
+    [Description("WHEN: user wants the full body of a specific scenario or needs node/edge details to reason about it.\n\nFetch the full Scenario document by id, including nodes, edges, breakpoints and groups.")]
     public static async Task<object> Get(
         IScenarioStore store,
         [Description("Scenario id (kebab-case identifier).")] string id,
@@ -45,7 +45,7 @@ public static class ScenariosTools
     }
 
     [McpServerTool(Name = "scenarios.save")]
-    [Description("Create or replace a scenario. Pass the full Scenario JSON object (id, name, nodes[], edges[]). Validates id matches ^[a-z0-9-]+$ and every edge endpoint exists in nodes[].")]
+    [Description("WHEN: authoring or updating a scenario from natural-language intent — call after deciding DAG shape, never before.\n\nCreate or replace a scenario. Pass the full Scenario JSON object (id, name, nodes[], edges[]). Validates id matches ^[a-z0-9-]+$ and every edge endpoint exists in nodes[].")]
     public static async Task<object> Save(
         IScenarioStore store,
         [Description("Scenario JSON object. Top-level fields: id, name, description?, tags?, nodes[], edges[], startNodeIds?, breakpoints?, groups?, caseSets?")] JsonElement scenario,
@@ -102,7 +102,7 @@ public static class ScenariosTools
     }
 
     [McpServerTool(Name = "scenarios.delete")]
-    [Description("Permanently delete a scenario by id.")]
+    [Description("WHEN: user explicitly asks to remove a scenario, or cleanup after a failed save.\n\nPermanently delete a scenario by id.")]
     public static async Task<object> Delete(
         IScenarioStore store,
         [Description("Scenario id to delete.")] string id,
@@ -117,7 +117,7 @@ public static class ScenariosTools
     }
 
     [McpServerTool(Name = "scenarios.run")]
-    [Description("Start a new run for the given scenario. Returns immediately with the runId; status begins at \"running\". Use runs.subscribe(runId) to stream events or runs.get(runId) to poll the snapshot.")]
+    [Description("WHEN: user asks to execute or rerun a scenario; do not call to inspect history (use runs.list instead).\n\nStart a new run for the given scenario. Returns immediately with the runId; status begins at \"running\". Use runs.subscribe(runId) to stream events or runs.get(runId) to poll the snapshot.")]
     public static async Task<object> Run(
         IScenarioStore store,
         IScenarioEngine engine,

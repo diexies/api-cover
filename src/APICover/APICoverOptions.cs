@@ -26,6 +26,11 @@ public sealed class APICoverOptions
     /// <c>{ScenarioRoot}/{id}.json</c> and survives process restarts.</summary>
     public string? ScenarioRoot { get; set; }
 
+    /// <summary>Filesystem root for persisted user-defined custom MCP tools. Null falls back
+    /// to <c>{ContentRoot}/docs/apicover-custom-tools</c>. Each tool lives at
+    /// <c>{CustomToolRoot}/{name}.json</c> and survives process restarts.</summary>
+    public string? CustomToolRoot { get; set; }
+
     /// <summary>
     /// Maximum time the engine waits for a paused breakpoint to be resolved before failing the
     /// node. Defaults to 30 minutes.

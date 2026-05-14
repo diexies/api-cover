@@ -18,17 +18,19 @@ public sealed class ToolDispatcher
     private readonly IEndpointDiscoveryService _discovery;
     private readonly IAgentMemoryStore _memory;
     private readonly IScenarioStore _scenarios;
+    private readonly ICustomToolInvoker? _customInvoker;
 
     private static readonly JsonSerializerOptions ScenarioJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory, IScenarioStore scenarios)
+    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory, IScenarioStore scenarios, ICustomToolInvoker? customInvoker = null)
     {
         _discovery = discovery;
         _memory = memory;
         _scenarios = scenarios;
+        _customInvoker = customInvoker;
     }
 
     public async Task<ToolResult> DispatchAsync(string toolName, JsonNode? input, CancellationToken cancellationToken)
@@ -47,6 +49,11 @@ public sealed class ToolDispatcher
                 ToolRegistry.SaveScenario => await HandleSaveScenarioAsync(input, cancellationToken),
                 _ => null
             };
+
+            if (output is null && _customInvoker is not null)
+            {
+                output = await _customInvoker.TryInvokeAsync(toolName, input, cancellationToken);
+            }
 
             if (output is null)
             {

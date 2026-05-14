@@ -313,6 +313,18 @@ export async function getGitCommit(sha: string): Promise<GitCommitDetail | null>
 export interface McpToolMeta {
   name: string;
   description: string;
+  whenTriggered?: string;
+  category: string;
+  paramsSchema?: unknown;
+  isCustom: boolean;
+}
+export interface LiveMcpConnection {
+  clientId: string;
+  userAgent?: string;
+  ip: string;
+  firstSeen: string;
+  lastSeen: string;
+  requestCount: number;
 }
 export interface McpInfo {
   enabled: boolean;
@@ -320,6 +332,7 @@ export interface McpInfo {
   stdioCommand: string;
   requireAuth: boolean;
   tools: McpToolMeta[];
+  liveConnections: LiveMcpConnection[];
   playbook: string;
 }
 export async function getMcpInfo(): Promise<McpInfo | null> {
@@ -327,6 +340,70 @@ export async function getMcpInfo(): Promise<McpInfo | null> {
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
+}
+
+export interface FlowchartNode {
+  id: string;
+  type: 'start' | 'end' | 'process' | 'decision' | 'loop' | 'catch' | 'finally';
+  label: string;
+  fullLabel?: string;
+  line?: number;
+  kind?: 'assignment' | 'return' | 'throw' | 'call' | null;
+  varName?: string;
+}
+export interface FlowchartEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+  dashed: boolean;
+}
+export interface FlowchartResult {
+  methodName?: string;
+  language: string;
+  nodes: FlowchartNode[];
+  edges: FlowchartEdge[];
+  truncated: boolean;
+  error?: string;
+}
+export async function getMethodFlowchart(path: string, line: number): Promise<FlowchartResult> {
+  const r = await fetch(`${apiBase}/source/flowchart?path=${encodeURIComponent(path)}&line=${line}`);
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    return { language: 'csharp', nodes: [], edges: [], truncated: false, error: `HTTP ${r.status} ${text}` };
+  }
+  return r.json();
+}
+
+export interface CustomToolDefinition {
+  name: string;
+  description: string;
+  whenTriggered: string;
+  method: string;
+  urlTemplate: string;
+  headers?: Record<string, string>;
+  bodyTemplate?: string;
+  paramsSchema: unknown;
+  createdAt?: string;
+  updatedAt?: string;
+}
+export async function listCustomTools(): Promise<CustomToolDefinition[]> {
+  const r = await fetch(`${apiBase}/mcp/custom-tools`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  return Array.isArray(j.tools) ? j.tools : [];
+}
+export async function createCustomTool(def: CustomToolDefinition): Promise<{ ok: boolean; errors?: string[]; requiresRestart?: boolean }> {
+  const r = await fetch(`${apiBase}/mcp/custom-tools`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(def),
+  });
+  return r.json();
+}
+export async function deleteCustomTool(name: string): Promise<void> {
+  const r = await fetch(`${apiBase}/mcp/custom-tools/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
 
 export interface ActiveAgentRun {
@@ -548,6 +625,47 @@ export interface SourceGrepResult {
 export async function grepSource(query: string, maxHits = 200): Promise<SourceGrepResult> {
   const params = new URLSearchParams({ q: query, maxHits: String(maxHits) });
   return apiJson<SourceGrepResult>(`${apiBase}/source/grep?${params}`);
+}
+
+export interface MethodCallSiteDto {
+  ref: string;
+  callerType: string;
+  callerMethod?: string;
+  filePath?: string;
+  lineNumber?: number;
+  endLine?: number;
+  bodySnippet?: string;
+  summary?: string;
+  calledByEndpoints: string[];
+}
+export interface MethodCalleeDto {
+  ref: string;
+  calleeType: string;
+  calleeMethod?: string;
+  kind: string;
+  resolvedImplType?: string;
+  filePath?: string;
+  lineNumber?: number;
+  endLine?: number;
+  summary?: string;
+}
+export interface MethodCallersDto {
+  declaringType: string;
+  methodName: string;
+  shortName: string;
+  callSites: MethodCallSiteDto[];
+  directCallers: CallerEntryDto[];
+  callees: MethodCalleeDto[];
+  totalCallSites: number;
+  transitiveEndpointCount: number;
+}
+
+export async function getMethodCallers(type: string, method: string): Promise<MethodCallersDto | null> {
+  const url = `${apiBase}/services/method-callers?type=${encodeURIComponent(type)}&method=${encodeURIComponent(method)}`;
+  const r = await apiFetch(url);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.json()) as MethodCallersDto;
 }
 
 export async function getServiceCallers(serviceId: string): Promise<ServiceCallersDto | null> {

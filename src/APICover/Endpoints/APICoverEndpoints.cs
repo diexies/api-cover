@@ -86,6 +86,27 @@ internal static class APICoverEndpoints
             }, Json);
         }).WithMetadata(new ExploreIgnoreAttribute()).ExcludeFromDescription();
 
+        // Method-level control-flow flowchart. Reuses the same path validation as /source
+        // (allowed extensions, file existence), then hands the source text to the Roslyn-backed
+        // builder. Returns { methodName, language, nodes[], edges[], truncated, error? } so the
+        // UI can pass it straight to xyflow without further parsing.
+        api.MapGet("/source/flowchart", (string path, int line) =>
+        {
+            if (string.IsNullOrWhiteSpace(path)) return Results.BadRequest(new { error = "path required" });
+            if (line < 1) return Results.BadRequest(new { error = "line must be >= 1" });
+            string full;
+            try { full = System.IO.Path.GetFullPath(path); }
+            catch { return Results.BadRequest(new { error = "invalid path" }); }
+            if (!System.IO.File.Exists(full)) return Results.NotFound();
+            var ext = System.IO.Path.GetExtension(full).ToLowerInvariant();
+            if (ext != ".cs") return Results.BadRequest(new { error = "flowchart only supported for .cs files" });
+            string sourceText;
+            try { sourceText = System.IO.File.ReadAllText(full); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+            var result = APICover.Discovery.Flowchart.MethodFlowchartBuilder.Build(sourceText, line);
+            return Results.Json(result, Json);
+        }).WithMetadata(new ExploreIgnoreAttribute()).ExcludeFromDescription();
+
         // Call-graph inspection — gated by EnableCallGraphInspection. Endpoint ids contain
         // forward slashes (e.g. "POST /invoices"), and ASP.NET Core's catch-all routing
         // doesn't decode `%2F` in path segments. Pass the id as a query parameter instead.
@@ -192,6 +213,17 @@ internal static class APICoverEndpoints
             if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
             if (string.IsNullOrWhiteSpace(id)) return Results.BadRequest(new { error = "id required" });
             var dto = await rev.GetCallersAsync(id);
+            return dto is null ? Results.NotFound() : Results.Json(dto, Json);
+        });
+
+        // Method-granular reverse fan-in: "which call sites hit exactly type.method?" Returns
+        // only the matching sites — does not collapse them into a per-service summary.
+        api.MapGet("/services/method-callers", async (string type, string method, IReverseCallIndexService rev, IOptions<APICoverOptions> o) =>
+        {
+            if (!o.Value.EnableCallGraphInspection) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(type)) return Results.BadRequest(new { error = "type required" });
+            if (string.IsNullOrWhiteSpace(method)) return Results.BadRequest(new { error = "method required" });
+            var dto = await rev.GetMethodCallersAsync(type, method);
             return dto is null ? Results.NotFound() : Results.Json(dto, Json);
         });
 

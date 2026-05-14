@@ -280,10 +280,28 @@ function LayeredDrillDownImpl({ map, visibleKinds, search = '', selectedId, requ
   }
   interface FlatEdge { from: string; to: string }
 
+  function isDataCarrierType(fullName: string): boolean {
+    if (!fullName) return false;
+    if (fullName.includes('Culture=') || fullName.includes('PublicKeyToken=') || fullName.includes('Version=')) return true;
+    const dot = fullName.lastIndexOf('.');
+    const simple = dot >= 0 ? fullName.substring(dot + 1) : fullName;
+    const suffixes = ['Dto', 'Dtos', 'ViewModel', 'VM', 'Request', 'Response', 'Command', 'Query', 'Event', 'Payload', 'Entity', 'Model', 'Options'];
+    for (const s of suffixes) if (simple.endsWith(s)) return true;
+    if (fullName.includes('.Dtos.') || fullName.includes('.Dto.') || fullName.includes('.Contracts.Dtos')
+      || fullName.includes('.ViewModels.') || fullName.includes('.Entities.') || fullName.includes('.Models.')) return true;
+    return false;
+  }
+
   function nodeKindForCall(c: CallNodeDto): ServiceMapNodeKind | null {
     if (c.kind === 'externalHttp') return 'externalHttp';
     if (c.kind === 'database') return 'database';
-    if (c.kind === 'interface' || c.kind === 'method' || c.kind === 'controllerMethod') return 'service';
+    if (c.kind === 'interface' || c.kind === 'method' || c.kind === 'controllerMethod') {
+      // Skip data carriers — DTOs / view-models / requests / entities / contracts aren't
+      // services. ServiceMapBuilder filters them server-side; the call-graph endpoint
+      // still includes them so apply the same filter on the consumer.
+      if (c.declaringType && isDataCarrierType(c.declaringType)) return null;
+      return 'service';
+    }
     return null;
   }
 
@@ -728,9 +746,10 @@ function LayeredDrillDownImpl({ map, visibleKinds, search = '', selectedId, requ
     path?: string;
     line?: number;
     endLine?: number;
+    methodName?: string;
   }
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
-  interface SourceFrame { nodeId: string; path?: string; line?: number; endLine?: number }
+  interface SourceFrame { nodeId: string; path?: string; line?: number; endLine?: number; methodName?: string }
   const [sourceOpen, setSourceOpen] = useState<SourceFrame | null>(null);
   const [sourceHistory, setSourceHistory] = useState<SourceFrame[]>([]);
 
@@ -764,7 +783,13 @@ function LayeredDrillDownImpl({ map, visibleKinds, search = '', selectedId, requ
 
   const handleShowSource = useCallback((realId: string) => {
     const node = flat.nodes.get(realId);
-    setSourceOpen({ nodeId: realId, path: node?.filePath, line: node?.lineNumber, endLine: node?.endLine });
+    setSourceOpen({
+      nodeId: realId,
+      path: node?.filePath,
+      line: node?.lineNumber,
+      endLine: node?.endLine,
+      methodName: node?.methodName,
+    });
     setSourceHistory([]);
   }, [flat.nodes]);
 
@@ -813,6 +838,7 @@ function LayeredDrillDownImpl({ map, visibleKinds, search = '', selectedId, requ
       path: node?.filePath,
       line: node?.lineNumber,
       endLine: node?.endLine,
+      methodName: node?.methodName,
     });
   }, [flat.nodes]);
 
@@ -1206,7 +1232,7 @@ function LayeredDrillDownImpl({ map, visibleKinds, search = '', selectedId, requ
             className="layered-ctxmenu-item"
             disabled={!ctxMenu.path}
             onClick={() => {
-              setSourceOpen({ nodeId: ctxMenu.nodeId, path: ctxMenu.path, line: ctxMenu.line, endLine: ctxMenu.endLine });
+              setSourceOpen({ nodeId: ctxMenu.nodeId, path: ctxMenu.path, line: ctxMenu.line, endLine: ctxMenu.endLine, methodName: ctxMenu.methodName });
               setCtxMenu(null);
             }}
           >
@@ -1248,9 +1274,16 @@ function LayeredDrillDownImpl({ map, visibleKinds, search = '', selectedId, requ
           path={sourceOpen.path}
           line={sourceOpen.line}
           endLine={sourceOpen.endLine}
+          methodName={sourceOpen.methodName}
           methodIndex={methodIndex}
           canGoBack={sourceHistory.length > 0}
-          onJumpTo={(target) => handleJumpInDrawer({ nodeId: target.id, path: target.path, line: target.line, endLine: target.endLine })}
+          onJumpTo={(target) => handleJumpInDrawer({
+            nodeId: target.id,
+            path: target.path,
+            line: target.line,
+            endLine: target.endLine,
+            methodName: target.methodName,
+          })}
           onBack={handleBackInDrawer}
           onClose={() => { setSourceOpen(null); setSourceHistory([]); }}
         />

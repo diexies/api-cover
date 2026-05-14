@@ -67,3 +67,60 @@ public sealed class CallerServiceEntry
     public string? Summary { get; init; }
     public string? MethodName { get; init; }
 }
+
+/// <summary>
+/// Method-granular reverse-fan-in: callers of a single <c>(declaringType, methodName)</c>
+/// target. Lets an LLM (or the UI's Callers tab opened from a method line) see only the
+/// call sites that hit the exact method being changed, instead of the whole service.
+/// </summary>
+public sealed class MethodCallersDto
+{
+    public required string DeclaringType { get; init; }
+    public required string MethodName { get; init; }
+    public required string ShortName { get; init; }      // declaring-type short
+
+    /// <summary>Call sites — one per (caller declaring type + caller method + line).
+    /// `Ref` is the canonical "CallerType.CallerMethod:Line" string also used by MCP.</summary>
+    public IReadOnlyList<MethodCallSite> CallSites { get; init; } = Array.Empty<MethodCallSite>();
+
+    /// <summary>Endpoint roots that transitively reach this method, with shortest-path
+    /// service chain via the call graph.</summary>
+    public IReadOnlyList<CallerEntry> DirectCallers { get; init; } = Array.Empty<CallerEntry>();
+
+    /// <summary>Forward dependencies — methods invoked inside this method's body.</summary>
+    public IReadOnlyList<MethodCallee> Callees { get; init; } = Array.Empty<MethodCallee>();
+
+    public int TotalCallSites { get; init; }
+    public int TransitiveEndpointCount { get; init; }
+}
+
+public sealed class MethodCallSite
+{
+    /// <summary>"CallerShortType.CallerMethod:Line" — null line renders as ":?".</summary>
+    public required string Ref { get; init; }
+    public required string CallerType { get; init; }
+    public string? CallerMethod { get; init; }
+    public string? FilePath { get; init; }
+    public int? LineNumber { get; init; }
+    public int? EndLine { get; init; }
+    public string? BodySnippet { get; init; }
+    public string? Summary { get; init; }
+    public IReadOnlyList<string> CalledByEndpoints { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>Forward dependency: a method invocation that originates inside the target method's
+/// body. Surfaced so an LLM about to edit the method sees both its callers and what it relies on.</summary>
+public sealed class MethodCallee
+{
+    /// <summary>"CalleeShortType.CalleeMethod:Line" using the callee's PDB metadata.</summary>
+    public required string Ref { get; init; }
+    public required string CalleeType { get; init; }
+    public string? CalleeMethod { get; init; }
+    /// <summary>CallNode kind — "Interface"/"Method"/"ExternalHttp"/"Database"/"Cycle"/etc.</summary>
+    public required string Kind { get; init; }
+    public string? ResolvedImplType { get; init; }
+    public string? FilePath { get; init; }
+    public int? LineNumber { get; init; }
+    public int? EndLine { get; init; }
+    public string? Summary { get; init; }
+}

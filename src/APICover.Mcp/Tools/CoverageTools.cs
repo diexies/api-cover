@@ -10,7 +10,7 @@ namespace APICover.Mcp.Tools;
 public static class CoverageTools
 {
     [McpServerTool(Name = "coverage.summary")]
-    [Description("Workspace coverage snapshot: total endpoints, covered (referenced by at least one scenario node), uncovered count, percentage.")]
+    [Description("WHEN: user asks overall coverage or wants a single percentage for reporting.\n\nWorkspace coverage snapshot: total endpoints, covered (referenced by at least one scenario node), uncovered count, percentage.")]
     public static async Task<object> Summary(
         IEndpointDiscoveryService discovery,
         IScenarioStore scenarios,
@@ -30,7 +30,7 @@ public static class CoverageTools
     }
 
     [McpServerTool(Name = "coverage.uncovered_endpoints")]
-    [Description("List endpoints that no scenario currently references. Use this to drive \"what new tests should I write?\" workflows.")]
+    [Description("WHEN: user asks 'what should I test next' / 'what is uncovered' — drives gap-filling scenario authoring.\n\nList endpoints that no scenario currently references.")]
     public static async Task<object> Uncovered(
         IEndpointDiscoveryService discovery,
         IScenarioStore scenarios,

@@ -34,6 +34,25 @@ When the conversation starts or the user asks "where do we stand?":
 3. `coverage.uncovered_endpoints` — what isn't tested yet.
 4. `scenarios.list` — what scenarios already exist.
 
+## BEFORE editing ANY method body — ALWAYS
+**Rule: never change a method until you have called `method.impact`.**
+
+Before you write, edit, or delete code inside a method:
+1. `method.impact(type, method)` — REQUIRED. Returns who calls this
+   method (`callSites`, `directCallers`) and what it calls
+   (`callees`). Both lists are file:line refs like
+   `WorkflowService.RejectAsync:142`.
+2. Read every `callSites[].ref` — those files break first if you
+   change the signature or behaviour.
+3. Read every `callees[].ref` — those are the contracts your method
+   leans on. Editing the body may break the way you call them.
+4. If `transitiveEndpointCount > 0`, list the endpoints in your
+   reply so the user knows which APIs are about to move.
+5. Only THEN propose the edit. Quote the impacted refs.
+
+Skip this only when the user explicitly says "no impact check" or
+the method has zero callers AND zero callees (e.g. brand new code).
+
 ## "What's broken right now?"
 1. `runs.list_failed` — one row per failed node. Includes runId,
    scenarioId, nodeId, method, path, statusCode, error.
@@ -90,6 +109,8 @@ the SDK forwards progress notifications so you can summarise milestones
 as they happen rather than waiting for a final snapshot.
 
 ## Hard rules
+- **Never edit a method without calling `method.impact` first.** No
+  exceptions besides the two carve-outs noted above.
 - Never invent endpoint paths. If `endpoints.list` doesn't show one,
   it doesn't exist for this workspace.
 - Never call `scenarios.delete`, `memory.delete`, or overwrite via

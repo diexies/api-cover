@@ -176,6 +176,7 @@ public sealed class AgentRunCoordinator
     private readonly IAgentRunStore _store;
     private readonly IAgentSessionStore _sessions;
     private readonly MemoryBootstrap _memoryBootstrap;
+    private readonly Abstractions.Services.ICustomToolStore? _customToolStore;
     private readonly IOptions<AgentOptions> _options;
     private readonly ILogger<AgentRunCoordinator> _log;
 
@@ -190,7 +191,8 @@ public sealed class AgentRunCoordinator
         IAgentSessionStore sessions,
         MemoryBootstrap memoryBootstrap,
         IOptions<AgentOptions> options,
-        ILogger<AgentRunCoordinator> log)
+        ILogger<AgentRunCoordinator> log,
+        Abstractions.Services.ICustomToolStore? customToolStore = null)
     {
         _anthropic = anthropic;
         _tools = tools;
@@ -199,6 +201,7 @@ public sealed class AgentRunCoordinator
         _store = store;
         _sessions = sessions;
         _memoryBootstrap = memoryBootstrap;
+        _customToolStore = customToolStore;
         _options = options;
         _log = log;
     }
@@ -294,6 +297,7 @@ public sealed class AgentRunCoordinator
             await EmitAsync(writer, session, new AgentEvent { Type = AgentEventType.RunStarted, RunId = runId });
 
             var systemPrompt = await BuildSystemPromptAsync(mode);
+            var toolList = await ToolRegistry.BuildClaudeToolListAsync(_customToolStore);
 
             var messages = new List<Message>
             {
@@ -318,7 +322,7 @@ public sealed class AgentRunCoordinator
                     MaxTokens = Math.Min(4096, _options.Value.MaxTokensPerRun),
                     System = systemPrompt,
                     Messages = messages.ToArray(),
-                    Tools = ToolRegistry.Definitions
+                    Tools = toolList
                 };
 
                 MessageResponse response;

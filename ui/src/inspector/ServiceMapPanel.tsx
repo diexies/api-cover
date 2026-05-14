@@ -233,21 +233,6 @@ export function ServiceMapPanel({ onClose }: Props) {
               >Force</button>
             </>
           )}
-          {view === 'map' && mapMode === 'tree' && (
-            <>
-              <span className="sysmap-view-sep" aria-hidden="true" />
-              <button
-                className={`sysmap-view-btn${direction === 'forward' ? ' is-active' : ''}`}
-                onClick={() => setDirection('forward')}
-                title="Endpoint → Services (forward call graph)"
-              >Endpoint →</button>
-              <button
-                className={`sysmap-view-btn${direction === 'reverse' ? ' is-active' : ''}`}
-                onClick={() => setDirection('reverse')}
-                title="Service → Endpoints (reverse fan-in: where is this service used?)"
-              >→ Service</button>
-            </>
-          )}
           <button className="sysmap-view-btn" onClick={() => void reload()} title="Refresh service map">↻</button>
           {onClose && (
             <button className="sysmap-view-btn sysmap-close" onClick={onClose} title="Close" aria-label="close">×</button>
@@ -255,31 +240,33 @@ export function ServiceMapPanel({ onClose }: Props) {
         </div>
       </header>
 
-      <div className="sysmap-controls">
-        <div className="sysmap-kinds" role="group" aria-label="visible node kinds">
-          {ALL_KINDS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={`sysmap-kind kind-${k}${visibleKinds.has(k) ? ' is-on' : ''}`}
-              onClick={() => toggleKind(k)}
-              aria-pressed={visibleKinds.has(k)}
-            >
-              <span className={`sysmap-kind-glyph glyph-${k}`} aria-hidden="true" />
-              <span className="sysmap-kind-label">{KIND_LABEL[k]}</span>
-              <span className="sysmap-kind-count">{counts[k] ?? 0}</span>
-            </button>
-          ))}
+      {view !== 'metrics' && (
+        <div className="sysmap-controls">
+          <div className="sysmap-kinds" role="group" aria-label="visible node kinds">
+            {ALL_KINDS.map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={`sysmap-kind kind-${k}${visibleKinds.has(k) ? ' is-on' : ''}`}
+                onClick={() => toggleKind(k)}
+                aria-pressed={visibleKinds.has(k)}
+              >
+                <span className={`sysmap-kind-glyph glyph-${k}`} aria-hidden="true" />
+                <span className="sysmap-kind-label">{KIND_LABEL[k]}</span>
+                <span className="sysmap-kind-count">{counts[k] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <input
+            className="sysmap-search"
+            type="search"
+            placeholder="filter by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="search nodes"
+          />
         </div>
-        <input
-          className="sysmap-search"
-          type="search"
-          placeholder="filter by name…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="search nodes"
-        />
-      </div>
+      )}
 
       {loading && <div className="sysmap-status">Loading…</div>}
       {error && <div className="sysmap-status sysmap-error">{error}</div>}
@@ -313,11 +300,39 @@ export function ServiceMapPanel({ onClose }: Props) {
                 onPick={setSelectedId}
                 selectedId={selectedId}
                 filterIsland={null}
+                onFocus={(id) => {
+                  setSelectedId(id);
+                  setView('map');
+                  setRequestedFocus((prev) => ({ id, bump: (prev?.bump ?? 0) + 1 }));
+                }}
               />
             </div>
           )}
 
           <aside className="sysmap-side" aria-label="side rail">
+            {view === 'map' && mapMode === 'tree' && (
+              <div className="sysmap-side-direction" role="tablist" aria-label="drill direction">
+                <div className="sysmap-side-direction-label">Direction</div>
+                <div className="sysmap-side-direction-buttons">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={direction === 'forward'}
+                    className={`sysmap-side-direction-btn${direction === 'forward' ? ' is-active' : ''}`}
+                    onClick={() => setDirection('forward')}
+                    title="Endpoint → Services (forward call graph)"
+                  >Endpoint →</button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={direction === 'reverse'}
+                    className={`sysmap-side-direction-btn${direction === 'reverse' ? ' is-active' : ''}`}
+                    onClick={() => setDirection('reverse')}
+                    title="Service → Endpoints (reverse fan-in)"
+                  >→ Service</button>
+                </div>
+              </div>
+            )}
             <div className="sysmap-side-section">
               <button
                 type="button"
@@ -505,7 +520,7 @@ function NodeDetailStrip({
         <Metric label="external" value={node.metrics.externalReach} />
         <Metric
           label="instability"
-          value={node.metrics.instability === null ? '—' : node.metrics.instability.toFixed(2)}
+          value={node.metrics.instability == null ? '—' : node.metrics.instability.toFixed(2)}
         />
         {isEndpoint && (
           <Metric label="siblings" value={node.metrics.siblingEndpoints} />

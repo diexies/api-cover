@@ -12,7 +12,7 @@ namespace APICover.Mcp.Tools;
 public static class RunsTools
 {
     [McpServerTool(Name = "runs.list")]
-    [Description("List recent runs with summary state. Optionally filter by scenario id. Newest first.")]
+    [Description("WHEN: user wants recent execution history overview or to find a specific run by scenario.\n\nList recent runs with summary state. Optionally filter by scenario id. Newest first.")]
     public static async Task<object> List(
         IRunStore store,
         [Description("Filter by scenario id.")] string? scenarioId = null,
@@ -36,7 +36,7 @@ public static class RunsTools
     }
 
     [McpServerTool(Name = "runs.list_failed")]
-    [Description("List recent runs that contain failed nodes, expanded one row per failure. Returns runId, scenarioId, nodeId, method, path, status code, error. Use this when answering \"which tests are broken right now?\".")]
+    [Description("WHEN: user asks what is broken / which tests are failing right now / triage red runs.\n\nList recent runs that contain failed nodes, expanded one row per failure. Returns runId, scenarioId, nodeId, method, path, status code, error.")]
     public static async Task<object> ListFailed(
         IRunStore runs,
         IScenarioStore scenarios,
@@ -87,7 +87,7 @@ public static class RunsTools
     }
 
     [McpServerTool(Name = "runs.get")]
-    [Description("Fetch the full Run snapshot (status, NodeResults with request/response, error text). Use after a run starts to inspect what happened end-to-end.")]
+    [Description("WHEN: deep-dive on a specific run — full request/response bodies per node, error stack. Prefer runs.timeline for compact summary.\n\nFetch the full Run snapshot (status, NodeResults with request/response, error text).")]
     public static async Task<object> Get(
         IRunStore store,
         [Description("Run id (returned by scenarios.run).")] string id,
@@ -104,7 +104,7 @@ public static class RunsTools
     }
 
     [McpServerTool(Name = "runs.timeline")]
-    [Description("Compact human-readable timeline of a run: one row per node in execution order, showing method, URL, status code, response body preview, and duration. Use this for a single-shot 'show me what happened' summary instead of pulling the whole Run snapshot. Bodies are truncated to ~400 chars.")]
+    [Description("WHEN: 'show me what happened' summary after a run completes — preferred over runs.get for human consumption.\n\nCompact human-readable timeline: one row per node in execution order, method, URL, status, response body preview, duration. Bodies truncated to ~400 chars.")]
     public static async Task<object> Timeline(
         IRunStore runs,
         IScenarioStore scenarios,
@@ -159,7 +159,7 @@ public static class RunsTools
     }
 
     [McpServerTool(Name = "runs.subscribe")]
-    [Description("Stream live run lifecycle events (RunStarted, NodeStarted, NodeCompleted, RunFinished, …) as MCP progress notifications until the run terminates. Returns the final Run snapshot.")]
+    [Description("WHEN: user wants live progress during a long-running scenario; call right after scenarios.run.\n\nStream live run lifecycle events (RunStarted, NodeStarted, NodeCompleted, RunFinished, …) as MCP progress notifications until the run terminates. Returns the final Run snapshot.")]
     public static async Task<object> Subscribe(
         IRunStore store,
         IRunEventBus bus,

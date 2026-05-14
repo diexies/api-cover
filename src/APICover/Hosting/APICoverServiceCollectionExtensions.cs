@@ -54,6 +54,9 @@ public static class APICoverServiceCollectionExtensions
         // Disk-backed scenario store so workspaces survive process restarts. The decorator
         // hydrates from {ScenarioRoot} on first access.
         services.TryAddSingleton<IScenarioStore, FilesystemScenarioStore>();
+        // Disk-backed custom MCP tool store; survives restarts. Used by both the MCP
+        // /info catalogue and the in-app agent's CustomToolInvoker.
+        services.TryAddSingleton<ICustomToolStore, FilesystemCustomToolStore>();
         // Concrete in-memory store registered, then decorated with FilesystemRunHistoryStore so
         // every terminal run is persisted under {RunHistoryRoot}/{scenarioId}/history. The
         // decorator also exposes ListHistory/DeleteHistory for the history endpoints.

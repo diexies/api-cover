@@ -15,7 +15,7 @@ namespace APICover.Mcp.Tools;
 public static class MemoryTools
 {
     [McpServerTool(Name = "memory.list")]
-    [Description("List memory files. Optional path prefix filter.")]
+    [Description("WHEN: discovering captured knowledge before answering or writing.\n\nList memory files. Optional path prefix filter.")]
     public static async Task<object> List(
         IAgentMemoryStore store,
         [Description("Optional path prefix filter (e.g. \"endpoints/\").")] string? prefix = null,
@@ -36,7 +36,7 @@ public static class MemoryTools
     }
 
     [McpServerTool(Name = "memory.read")]
-    [Description("Read the full content of a memory file. Returns { found: bool, content?: string }.")]
+    [Description("WHEN: need the body of a specific memory file after memory.list shows it exists.\n\nRead the full content of a memory file. Returns { found: bool, content?: string }.")]
     public static async Task<object> Read(
         IAgentMemoryStore store,
         [Description("Relative path under the memory root, e.g. \"endpoints/users.md\".")] string path,
@@ -53,7 +53,7 @@ public static class MemoryTools
     }
 
     [McpServerTool(Name = "memory.write")]
-    [Description("Create or replace a memory file (markdown only — paths must end with .md).")]
+    [Description("WHEN: persisting a new piece of stable knowledge worth recalling in future sessions.\n\nCreate or replace a memory file (markdown only — paths must end with .md).")]
     public static async Task<object> Write(
         IAgentMemoryStore store,
         [Description("Relative path under the memory root.")] string path,
@@ -69,7 +69,7 @@ public static class MemoryTools
     }
 
     [McpServerTool(Name = "memory.append")]
-    [Description("Append content to an existing memory file (creates if absent).")]
+    [Description("WHEN: extending an existing memory file with a new section/log entry instead of overwriting.\n\nAppend content to an existing memory file (creates if absent).")]
     public static async Task<object> Append(
         IAgentMemoryStore store,
         [Description("Relative path under the memory root.")] string path,
@@ -85,7 +85,7 @@ public static class MemoryTools
     }
 
     [McpServerTool(Name = "memory.delete")]
-    [Description("Delete a memory file by path.")]
+    [Description("WHEN: user asks to forget something, or removing outdated/incorrect memory.\n\nDelete a memory file by path.")]
     public static async Task<object> Delete(
         IAgentMemoryStore store,
         [Description("Relative path under the memory root.")] string path,

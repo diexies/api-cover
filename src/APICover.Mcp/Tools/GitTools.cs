@@ -10,7 +10,7 @@ namespace APICover.Mcp.Tools;
 public static class GitTools
 {
     [McpServerTool(Name = "git.commit_impact")]
-    [Description("Inspect a commit (files changed, status, +/- counts, per-file unified patch) alongside the workspace's scenario inventory. Returns the diff plus every scenario's endpoint references so the calling LLM can decide which scenarios the commit may have broken or which new ones should be authored.")]
+    [Description("WHEN: user references a commit SHA and asks what tests it affects / what new scenarios to write.\n\nInspect a commit (files changed, status, +/- counts, per-file unified patch) alongside the workspace's scenario inventory. Returns the diff plus every scenario's endpoint references so the calling LLM can decide which scenarios the commit may have broken or which new ones should be authored.")]
     public static async Task<object> CommitImpact(
         IHostEnvironment env,
         IScenarioStore scenarios,
