@@ -2,12 +2,15 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { getSource, type SourceSlice } from '../api';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-csharp';
+import { MethodFlowchart } from './MethodFlowchart';
+import { ServiceCallersList } from './ServiceCallersList';
 
 export interface MethodIndexEntry {
   id: string;
   path?: string;
   line?: number;
   endLine?: number;
+  methodName?: string;
 }
 
 interface Props {
@@ -15,6 +18,10 @@ interface Props {
   path?: string;
   line?: number;
   endLine?: number;
+  /** Plain method name (no params). When present, the Callers tab fetches the
+   * method-granular reverse index instead of the whole-service rollup so the LLM/user
+   * sees only call sites that hit this exact method. */
+  methodName?: string;
   /** Method-name → location map so the drawer can wire `_x.MethodName(` mentions into
    * click-through jumps without re-fetching the call graph. */
   methodIndex?: Map<string, MethodIndexEntry>;
@@ -35,11 +42,30 @@ interface Props {
  * the drawer scrolls the start line into view, highlights the method range, and dims the rest
  * of the file so the eye lands on the relevant method instantly.
  */
-function SourceDrawerImpl({ nodeId, path, line, endLine, methodIndex, onJumpTo, canGoBack, onBack, onClose }: Props) {
+type ViewMode = 'source' | 'diagram' | 'callers';
+const VIEW_KEY = 'apicover.sourceDrawerView';
+
+function SourceDrawerImpl({ nodeId, path, line, endLine, methodName, methodIndex, onJumpTo, canGoBack, onBack, onClose }: Props) {
   const [slice, setSlice] = useState<SourceSlice | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const focusRef = useRef<HTMLDivElement | null>(null);
+  // Service nodes use a dotted FQTN id; endpoints look like "METHOD /path". Only services
+  // expose a meaningful reverse-fan-in caller list, so we gate the Callers tab on that shape.
+  const isService = !nodeId.includes(' /') && nodeId.includes('.');
+  const [view, setView] = useState<ViewMode>(() => {
+    try {
+      const v = window.localStorage?.getItem(VIEW_KEY);
+      if (v === 'diagram') return 'diagram';
+      if (v === 'callers' && isService) return 'callers';
+      return 'source';
+    } catch { return 'source'; }
+  });
+
+  function pickView(v: ViewMode) {
+    setView(v);
+    try { window.localStorage?.setItem(VIEW_KEY, v); } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     if (!path) { setSlice(null); setErr(null); return; }
@@ -168,6 +194,31 @@ function SourceDrawerImpl({ nodeId, path, line, endLine, methodIndex, onJumpTo, 
               <span className="muted small">{` :${methodStart}`}</span>
             ) : null}
           </div>
+          <div className="source-drawer-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'source'}
+              className={`source-drawer-tab${view === 'source' ? ' is-active' : ''}`}
+              onClick={() => pickView('source')}
+            >Source</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'diagram'}
+              className={`source-drawer-tab${view === 'diagram' ? ' is-active' : ''}`}
+              onClick={() => pickView('diagram')}
+            >Diagram</button>
+            {isService && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'callers'}
+                className={`source-drawer-tab${view === 'callers' ? ' is-active' : ''}`}
+                onClick={() => pickView('callers')}
+              >Callers</button>
+            )}
+          </div>
           <button type="button" className="source-drawer-close" onClick={onClose} aria-label="Close">×</button>
         </header>
         {!path && (
@@ -198,7 +249,7 @@ function SourceDrawerImpl({ nodeId, path, line, endLine, methodIndex, onJumpTo, 
             })}
           </div>
         )}
-        {slice && (
+        {slice && view === 'source' && (
           <div className="source-drawer-body">
             <div className="source-drawer-path muted small">{slice.path}</div>
             <pre
@@ -243,6 +294,26 @@ function SourceDrawerImpl({ nodeId, path, line, endLine, methodIndex, onJumpTo, 
                 );
               })}
             </pre>
+          </div>
+        )}
+        {slice && view === 'diagram' && path && pdbStart != null && (
+          <div className="source-drawer-body source-drawer-diagram-full">
+            <MethodFlowchart path={path} line={pdbStart} />
+          </div>
+        )}
+        {slice && view === 'diagram' && (!path || pdbStart == null) && (
+          <div className="source-drawer-empty muted">Diagram unavailable — no method source mapping for this node.</div>
+        )}
+        {view === 'callers' && isService && (
+          <div className="source-drawer-body source-drawer-callers-full">
+            <ServiceCallersList
+              serviceId={nodeId}
+              methodName={methodName}
+              onPickSource={(filePath, ln, endLn) => {
+                pickView('source');
+                if (onJumpTo) onJumpTo({ id: nodeId, path: filePath, line: ln, endLine: endLn });
+              }}
+            />
           </div>
         )}
       </aside>

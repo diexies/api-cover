@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using APICover.Abstractions.Services;
 using APICover.Agent.Anthropic;
 
 namespace APICover.Agent.Tools;
@@ -19,6 +20,32 @@ public static class ToolRegistry
     public const string SaveScenario = "save_scenario";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
+
+    /// <summary>
+    /// Returns the static built-in definitions plus any user-defined custom tools currently
+    /// in the store. Called by the run coordinator when assembling the tool list sent to
+    /// Claude so the agent can invoke custom tools directly (no restart needed for in-app use).
+    /// </summary>
+    public static async Task<IReadOnlyList<ToolDefinition>> BuildClaudeToolListAsync(ICustomToolStore? store, CancellationToken ct = default)
+    {
+        if (store is null) return Definitions;
+        var customs = await store.ListAsync(ct);
+        if (customs.Count == 0) return Definitions;
+        var list = new List<ToolDefinition>(Definitions);
+        foreach (var def in customs)
+        {
+            var schemaText = def.ParamsSchema.GetRawText();
+            list.Add(new ToolDefinition
+            {
+                Name = def.Name,
+                Description = string.IsNullOrWhiteSpace(def.WhenTriggered)
+                    ? def.Description
+                    : $"WHEN: {def.WhenTriggered}\n\n{def.Description}",
+                InputSchema = JsonNode.Parse(schemaText) ?? new JsonObject { ["type"] = "object" },
+            });
+        }
+        return list;
+    }
 
     private static IReadOnlyList<ToolDefinition> BuildDefinitions()
     {

@@ -8,7 +8,7 @@ namespace APICover.Mcp.Tools;
 public static class EndpointsTools
 {
     [McpServerTool(Name = "endpoints.list")]
-    [Description("List discovered HTTP endpoints. Optionally filter by area (prefix match) or HTTP method (e.g. GET, POST).")]
+    [Description("WHEN: learning the API surface before authoring scenarios; first step of scenario inference.\n\nList discovered HTTP endpoints. Optionally filter by area (prefix match) or HTTP method (e.g. GET, POST).")]
     public static object List(
         IEndpointDiscoveryService discovery,
         [Description("Area prefix filter, e.g. \"Billing\".")] string? area = null,
@@ -41,7 +41,7 @@ public static class EndpointsTools
     }
 
     [McpServerTool(Name = "endpoints.details")]
-    [Description("Fetch the full descriptor for an endpoint id (e.g. \"GET /invoices/{id}\"). Includes parameters, request/response shapes, samples, and auth requirements.")]
+    [Description("WHEN: about to add an endpoint to a scenario and need its parameter/body schema. Do NOT call for every endpoint — pick promising chains first.\n\nFetch the full descriptor for an endpoint id (e.g. \"GET /invoices/{id}\"). Includes parameters, request/response shapes, samples, and auth requirements.")]
     public static object Details(
         IEndpointDiscoveryService discovery,
         [Description("Endpoint id in the form \"METHOD /path\".")] string id)

@@ -16,4 +16,11 @@ public interface IReverseCallIndexService
     /// cached call graph — i.e. dead code, unregistered service, or call-graph warmup not
     /// finished yet.</summary>
     Task<ServiceCallersDto?> GetCallersAsync(string serviceId, CancellationToken cancellationToken = default);
+
+    /// <summary>Method-granular variant: returns only the call sites that hit
+    /// <paramref name="declaringType"/>.<paramref name="methodName"/>, plus the endpoint roots
+    /// that transitively reach that method via the call graph. Falls back to a concrete impl's
+    /// interface when the impl id is passed in but the call sites dispatched through the
+    /// interface (mirrors <see cref="GetCallersAsync"/> behaviour).</summary>
+    Task<MethodCallersDto?> GetMethodCallersAsync(string declaringType, string methodName, CancellationToken cancellationToken = default);
 }

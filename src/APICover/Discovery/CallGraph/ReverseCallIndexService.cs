@@ -18,6 +18,11 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
     // walker records `declaringType=interface, resolvedImplType=impl`), so a lookup against
     // a concrete impl id transparently redirects to its interface entry.
     private Dictionary<string, string> _implToInterface = new(StringComparer.Ordinal);
+    // Method-granular reverse map: (declaringType, methodName) → DTO. Populated in the same
+    // walk as the service-level cache; keyed by "type|method" so we can use a flat dict.
+    private Dictionary<string, MethodCallersDto> _methodCache = new(StringComparer.Ordinal);
+
+    private static string MethodKey(string type, string method) => type + "|" + method;
 
     public ReverseCallIndexService(ICallGraphStore store)
     {
@@ -31,13 +36,16 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
         // Mutable accumulators per service id. Combined into immutable DTOs at the end.
         var services = new Dictionary<string, MutableEntry>(StringComparer.Ordinal);
 
+        // Method-granular accumulator keyed by "declaringType|methodName".
+        var methods = new Dictionary<string, MutableMethodEntry>(StringComparer.Ordinal);
+
         foreach (var graph in graphs)
         {
             // Stack mirrors the ancestor chain of *service* nodes seen on the way to the
             // current node (endpoint root excluded). Used to materialise the "via" chain
             // for each caller hit + the immediate-parent service relation.
             var ancestorServices = new List<string>(8);
-            Visit(graph.RootCall, graph.EndpointId, ancestorServices, services, isRoot: true);
+            Visit(graph.RootCall, graph.EndpointId, ancestorServices, services, methods, parentNode: null, isRoot: true);
         }
 
         // Materialise: shortest-via wins per (service, endpoint) pair; method callers + caller-service
@@ -106,9 +114,73 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
             }
         }
 
+        // Method-granular snapshot.
+        var methodSnapshot = new Dictionary<string, MethodCallersDto>(methods.Count, StringComparer.Ordinal);
+        foreach (var (mkey, mentry) in methods)
+        {
+            var sep = mkey.IndexOf('|');
+            var declaring = sep < 0 ? mkey : mkey[..sep];
+            var methodName = sep < 0 ? "?" : mkey[(sep + 1)..];
+
+            var sites = mentry.Sites.Values
+                .Select(s => new MethodCallSite
+                {
+                    Ref = CallSiteRef.Format(s.CallerType, s.CallerMethod, s.LineNumber),
+                    CallerType = s.CallerType,
+                    CallerMethod = s.CallerMethod,
+                    FilePath = s.FilePath,
+                    LineNumber = s.LineNumber,
+                    EndLine = s.EndLine,
+                    BodySnippet = s.BodySnippet,
+                    Summary = s.Summary,
+                    CalledByEndpoints = s.Endpoints.OrderBy(e => e, StringComparer.Ordinal).ToArray(),
+                })
+                .OrderBy(s => s.Ref, StringComparer.Ordinal)
+                .ToList();
+
+            var directs = mentry.DirectCallers
+                .Select(kv => new CallerEntry
+                {
+                    EndpointId = kv.Key,
+                    Via = kv.Value.Via,
+                    CallSites = kv.Value.CallSites,
+                })
+                .OrderBy(c => c.EndpointId, StringComparer.Ordinal)
+                .ToList();
+
+            var callees = mentry.Callees.Values
+                .Select(c => new MethodCallee
+                {
+                    Ref = CallSiteRef.Format(c.CalleeType, c.CalleeMethod, c.LineNumber),
+                    CalleeType = c.CalleeType,
+                    CalleeMethod = c.CalleeMethod,
+                    Kind = c.Kind,
+                    ResolvedImplType = c.ResolvedImplType,
+                    FilePath = c.FilePath,
+                    LineNumber = c.LineNumber,
+                    EndLine = c.EndLine,
+                    Summary = c.Summary,
+                })
+                .OrderBy(c => c.Ref, StringComparer.Ordinal)
+                .ToList();
+
+            methodSnapshot[mkey] = new MethodCallersDto
+            {
+                DeclaringType = declaring,
+                MethodName = methodName,
+                ShortName = ShortName(declaring),
+                CallSites = sites,
+                DirectCallers = directs,
+                Callees = callees,
+                TotalCallSites = sites.Sum(s => s.CalledByEndpoints.Count),
+                TransitiveEndpointCount = directs.Count,
+            };
+        }
+
         // Single-line swap. Concurrent readers see either the old or the new snapshot, never a partial.
         _cache = snapshot;
         _implToInterface = implMap;
+        _methodCache = methodSnapshot;
     }
 
     public Task<ServiceCallersDto?> GetCallersAsync(string serviceId, CancellationToken cancellationToken = default)
@@ -127,23 +199,48 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
         return Task.FromResult(dto);
     }
 
+    public Task<MethodCallersDto?> GetMethodCallersAsync(string declaringType, string methodName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(declaringType) || string.IsNullOrEmpty(methodName))
+        {
+            return Task.FromResult<MethodCallersDto?>(null);
+        }
+        var key = MethodKey(declaringType, methodName);
+        if (_methodCache.TryGetValue(key, out var dto)) return Task.FromResult<MethodCallersDto?>(dto);
+        // Concrete impl id asked but the call sites dispatch through the interface — fall back.
+        if (_implToInterface.TryGetValue(declaringType, out var ifaceId))
+        {
+            var ifaceKey = MethodKey(ifaceId, methodName);
+            if (_methodCache.TryGetValue(ifaceKey, out var ifaceDto)) return Task.FromResult<MethodCallersDto?>(ifaceDto);
+        }
+        return Task.FromResult<MethodCallersDto?>(null);
+    }
+
     private static void Visit(
         CallNode node,
         string endpointId,
         List<string> ancestorServices,
         Dictionary<string, MutableEntry> services,
+        Dictionary<string, MutableMethodEntry> methods,
+        CallNode? parentNode,
         bool isRoot)
     {
         // The endpoint root is the controller method itself — we treat it as the caller, not
         // a service. Recurse into its children with an empty ancestor list.
         if (!isRoot)
         {
+            // Forward dep — record `node` as a callee of `parentNode` regardless of node.Kind.
+            // Catches HTTP / DB / Dynamic / etc. boundaries too. Parent must itself be a named
+            // method to attribute the dep to.
+            RecordMethodCallee(parentNode, node, methods);
+
             // Accept any node that surfaces a declaringType. interface / method / controllerMethod
             // are the three kinds that carry source-level identity for reverse indexing.
             if (node.Kind is CallNodeKind.Interface or CallNodeKind.Method or CallNodeKind.ControllerMethod
                 && !string.IsNullOrEmpty(node.DeclaringType))
             {
                 RecordHit(node, endpointId, ancestorServices, services);
+                RecordMethodHit(node, endpointId, ancestorServices, methods, parentNode);
                 ancestorServices.Add(node.DeclaringType!);
             }
 
@@ -163,7 +260,7 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
 
         foreach (var child in node.Calls)
         {
-            Visit(child, endpointId, ancestorServices, services, isRoot: false);
+            Visit(child, endpointId, ancestorServices, services, methods, parentNode: node, isRoot: false);
         }
 
         // Pop whatever we pushed for this node so siblings start from the correct depth.
@@ -253,6 +350,104 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
         }
     }
 
+    private static void RecordMethodHit(
+        CallNode node,
+        string endpointId,
+        List<string> ancestorServices,
+        Dictionary<string, MutableMethodEntry> methods,
+        CallNode? parentNode)
+    {
+        if (string.IsNullOrEmpty(node.MethodName)) return;
+        var key = MethodKey(node.DeclaringType!, node.MethodName!);
+        if (!methods.TryGetValue(key, out var entry))
+        {
+            entry = new MutableMethodEntry();
+            methods[key] = entry;
+        }
+
+
+        // endpoint hit + shortest via chain — mirrors the service-level aggregation.
+        if (!entry.DirectCallers.TryGetValue(endpointId, out var hit))
+        {
+            entry.DirectCallers[endpointId] = new CallerAggregate
+            {
+                Via = ancestorServices.Count == 0
+                    ? Array.Empty<string>()
+                    : ancestorServices.ToArray(),
+                CallSites = 1,
+            };
+        }
+        else
+        {
+            hit.CallSites++;
+            if (ancestorServices.Count < hit.Via.Count)
+            {
+                hit.Via = ancestorServices.ToArray();
+            }
+        }
+
+        // Caller call site: when parent is the endpoint root we leave callerType as the
+        // root's declaring type (controller). Endpoints surface as direct callers above so
+        // skipping the synthetic root here would lose every controller→service hit.
+        var callerType = parentNode?.DeclaringType;
+        if (string.IsNullOrEmpty(callerType)) return;        // can't attribute — drop
+        var callerMethod = parentNode?.MethodName;
+        var siteKey = callerType + "|" + (callerMethod ?? "?") + "|" + (parentNode?.LineNumber?.ToString() ?? "?");
+        if (!entry.Sites.TryGetValue(siteKey, out var site))
+        {
+            site = new MutableMethodCallSite
+            {
+                CallerType = callerType,
+                CallerMethod = callerMethod,
+                FilePath = parentNode?.FilePath,
+                LineNumber = parentNode?.LineNumber,
+                EndLine = parentNode?.EndLine,
+                BodySnippet = parentNode?.BodySnippet,
+                Summary = parentNode?.Summary,
+            };
+            entry.Sites[siteKey] = site;
+        }
+        site.Endpoints.Add(endpointId);
+    }
+
+    private static void RecordMethodCallee(
+        CallNode? parentNode,
+        CallNode child,
+        Dictionary<string, MutableMethodEntry> methods)
+    {
+        if (parentNode is null
+            || string.IsNullOrEmpty(parentNode.DeclaringType)
+            || string.IsNullOrEmpty(parentNode.MethodName))
+        {
+            return;
+        }
+        // Filter noise — DTO / view-model carriers, property accessors, operator overloads,
+        // ctors. They're not function:function dependencies; surfacing them just hides the
+        // real wiring (Service.Foo → IPriceListService.GetX).
+        if (IsNoiseCallee(child)) return;
+        var parentKey = MethodKey(parentNode.DeclaringType!, parentNode.MethodName!);
+        if (!methods.TryGetValue(parentKey, out var parentEntry))
+        {
+            parentEntry = new MutableMethodEntry();
+            methods[parentKey] = parentEntry;
+        }
+        var calleeKey = (child.DeclaringType ?? "?") + "|"
+            + (child.MethodName ?? child.DisplayName ?? "?") + "|"
+            + (child.LineNumber?.ToString() ?? "?");
+        if (parentEntry.Callees.ContainsKey(calleeKey)) return;
+        parentEntry.Callees[calleeKey] = new MutableMethodCallee
+        {
+            CalleeType = child.DeclaringType ?? "?",
+            CalleeMethod = child.MethodName ?? child.DisplayName,
+            Kind = child.Kind.ToString(),
+            ResolvedImplType = child.ResolvedImplType,
+            FilePath = child.FilePath,
+            LineNumber = child.LineNumber,
+            EndLine = child.EndLine,
+            Summary = child.Summary,
+        };
+    }
+
     private static void RecordImplHit(
         CallNode node,
         string endpointId,
@@ -300,6 +495,27 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
         }
     }
 
+    private static bool IsNoiseCallee(CallNode c)
+    {
+        // Data carriers (DTOs / view-models / requests / responses / entities / models)
+        // don't represent function:function dependencies — their property accessors and
+        // ctors flood the list. Reuse the same heuristic the service map uses.
+        if (!string.IsNullOrEmpty(c.DeclaringType) && ServiceMapBuilder.IsDataCarrierType(c.DeclaringType!))
+        {
+            return true;
+        }
+        // Accessors / operators / ctors collapse to property/operator semantics — not real
+        // call sites for refactoring. Skip them across all types so log/event classes etc.
+        // don't pollute the dep list either.
+        var m = c.MethodName;
+        if (string.IsNullOrEmpty(m)) return false;
+        if (m.StartsWith("get_", StringComparison.Ordinal)) return true;
+        if (m.StartsWith("set_", StringComparison.Ordinal)) return true;
+        if (m.StartsWith("op_", StringComparison.Ordinal)) return true;
+        if (m == ".ctor" || m == ".cctor") return true;
+        return false;
+    }
+
     private static string ShortName(string fullName)
     {
         if (string.IsNullOrEmpty(fullName)) return fullName;
@@ -326,5 +542,41 @@ internal sealed class ReverseCallIndexService : IReverseCallIndexService
     {
         public IReadOnlyList<string> Via { get; set; } = Array.Empty<string>();
         public int CallSites { get; set; }
+    }
+
+    // Method-granular accumulator. One per (declaringType, methodName) seen as a callee.
+    private sealed class MutableMethodEntry
+    {
+        // dedupe by callerType + callerMethod + line so the same source line collapses across walks.
+        public Dictionary<string, MutableMethodCallSite> Sites { get; } = new(StringComparer.Ordinal);
+        // endpointId → shortest via chain
+        public Dictionary<string, CallerAggregate> DirectCallers { get; } = new(StringComparer.Ordinal);
+        // Forward deps — methods invoked inside this method's body. Dedupe per
+        // (calleeType, calleeMethod, line) so siblings don't collapse but identical sites do.
+        public Dictionary<string, MutableMethodCallee> Callees { get; } = new(StringComparer.Ordinal);
+    }
+
+    private sealed class MutableMethodCallee
+    {
+        public required string CalleeType;
+        public string? CalleeMethod;
+        public required string Kind;
+        public string? ResolvedImplType;
+        public string? FilePath;
+        public int? LineNumber;
+        public int? EndLine;
+        public string? Summary;
+    }
+
+    private sealed class MutableMethodCallSite
+    {
+        public required string CallerType;
+        public string? CallerMethod;
+        public string? FilePath;
+        public int? LineNumber;
+        public int? EndLine;
+        public string? BodySnippet;
+        public string? Summary;
+        public HashSet<string> Endpoints { get; } = new(StringComparer.Ordinal);
     }
 }
