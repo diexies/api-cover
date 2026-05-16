@@ -23,6 +23,7 @@ import { useNodeStatusOverlay } from './hooks/useNodeStatusOverlay';
 import { useRunExecution } from './hooks/useRunExecution';
 import { useBranchClones } from './hooks/useBranchClones';
 import { useScenarioModel } from './hooks/useScenarioModel';
+import { useScenarioHistory, type ScenarioSnapshot } from './hooks/useScenarioHistory';
 import { type AuthConfig } from './auth';
 import { GroupSettingsModal } from './GroupSettingsModal';
 import { wouldCreateCycle } from './dag';
@@ -168,6 +169,50 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     onSave,
   } = model;
 
+  // ─── Undo/redo ─────────────────────────────────────────────────────────
+  const currentSnapshot: ScenarioSnapshot = {
+    apiNodes, breakpoints, startNodeIds, groups, caseSets,
+    flowName, flowDescription, flowTags,
+  };
+  const history = useScenarioHistory({
+    current: currentSnapshot,
+    apply: (snap) => {
+      setApiNodes(snap.apiNodes);
+      setBreakpoints(snap.breakpoints);
+      setStartNodeIds(snap.startNodeIds);
+      setGroups(snap.groups);
+      setCaseSets(snap.caseSets);
+      setFlowName(snap.flowName);
+      setFlowDescription(snap.flowDescription);
+      setFlowTags(snap.flowTags);
+    },
+  });
+
+  // Cmd+Z / Ctrl+Z undo, Cmd+Shift+Z / Ctrl+Y redo. Skip when focus is inside a text
+  // entry control so we don't trample the native input undo buffer.
+  useEffect(() => {
+    function isInsideInput(t: EventTarget | null): boolean {
+      if (!t || !(t instanceof HTMLElement)) return false;
+      const tag = t.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+    }
+    function handler(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (isInsideInput(e.target)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        history.undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        history.redo();
+      }
+    }
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [history]);
+
   // Reset everything when scenario changes. Force-saves any pending edits to the
   // outgoing scenario before swapping so a debounce in flight doesn't lose data.
   useEffect(() => {
@@ -189,6 +234,16 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     setSelectedNodeId(null);
     setSelectedBranchKey(null);
     runExec.reset();
+    history.reset({
+      apiNodes: scenario.nodes,
+      breakpoints: scenario.breakpoints ?? [],
+      startNodeIds: scenario.startNodeIds ?? [],
+      groups: scenario.groups ?? [],
+      caseSets: scenario.caseSets ?? [],
+      flowName: scenario.name,
+      flowDescription: scenario.description ?? '',
+      flowTags: scenario.tags ?? [],
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenario.id]);
 
@@ -477,6 +532,18 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           onForceSave={onSave}
         />
         <button className="btn" onClick={onAutoLayout}>⌘ Layout</button>
+        <button
+          className="btn"
+          onClick={history.undo}
+          disabled={!history.canUndo}
+          title="Undo (⌘Z)"
+        >↶ Undo</button>
+        <button
+          className="btn"
+          onClick={history.redo}
+          disabled={!history.canRedo}
+          title="Redo (⌘⇧Z)"
+        >↷ Redo</button>
         {run && (
           <span className={`run-status status-${run.status}`}>
             run {run.id.slice(0, 8)} · {run.status}
@@ -635,6 +702,8 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           onClose={() => setSelectedNodeId(null)}
           onFocusNode={(id) => setSelectedNodeId(id)}
           onEditGroup={(gid) => setEditingGroupId(gid)}
+          onUpdateGroup={(next) => updateGroup(next)}
+          onDeleteGroup={(gid) => deleteGroup(gid)}
           onCaseSetChange={(anchorId, next) => {
             setDirty(true);
             setCaseSets((cur) => {

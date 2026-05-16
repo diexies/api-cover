@@ -199,6 +199,24 @@ export function useCanvasContextMenus(
           },
         },
       ];
+      // Groups this node could be added to (not the one it's already in). The geometric
+      // membership rule (centre-inside-bounds) is bypassed here — explicit add wins over
+      // geometry, mirroring how "Remove from group" overrides containment.
+      const otherGroups = groups.filter((g) => !g.nodeIds.includes(canonicalId));
+      const addToGroupItems: MenuItem[] = otherGroups.length > 0
+        ? [
+            { separator: true },
+            { label: 'Add to group:', header: true },
+            ...otherGroups.map<MenuItem>((g) => ({
+              label: `⊞ ${g.label ?? g.id}`,
+              onClick: () => updateGroup({
+                ...g,
+                nodeIds: [...g.nodeIds, canonicalId],
+              }),
+            })),
+          ]
+        : [];
+
       const itemsForGroupAware: MenuItem[] = myGroup
         ? [
             { separator: true },
@@ -216,14 +234,16 @@ export function useCanvasContextMenus(
                 });
               },
             },
+            ...addToGroupItems,
           ]
         : (selectedIds.length > 1 && selectedIds.includes(node.id))
           ? [
               { separator: true },
               { label: `${selectedIds.length} nodes selected`, header: true },
               { label: '⊞ Create group from selection', onClick: createGroupFromSelection },
+              ...addToGroupItems,
             ]
-          : [];
+          : addToGroupItems;
 
       const epForNode = endpointLookup.get(`${data.method.toUpperCase()} ${normalisePath(data.path)}`);
       setMenu({

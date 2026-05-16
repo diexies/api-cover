@@ -38,6 +38,12 @@ interface Props {
   onFocusNode?: (id: string) => void;
   /** Open the GroupSettingsModal for a specific group (used by Branching tab). */
   onEditGroup?: (groupId: string) => void;
+  /** All scenario groups — drives the "add to group" picker in BranchingTab. */
+  allGroups?: ExecutionGroup[];
+  /** Persist a single group mutation (add/remove membership from BranchingTab). */
+  onUpdateGroup?: (next: ExecutionGroup) => void;
+  /** Drop a group entirely when last member is removed. */
+  onDeleteGroup?: (groupId: string) => void;
   /** CaseSet attached to this node, if any (the anchor). */
   caseSetForNode?: CaseSet;
   /** Persist a new/edited case set, or remove (null) it. */
@@ -67,6 +73,9 @@ function NodeInspectorInner({
   endpoint,
   isStartNode,
   groupsForNode,
+  allGroups,
+  onUpdateGroup,
+  onDeleteGroup,
   iterations,
   siblings,
   upstreamIds,
@@ -292,6 +301,7 @@ function NodeInspectorInner({
               onBodyChange={(v) => applyChanges({ body: v })}
               onBodyTextChange={commitBody}
               onLoadSample={loadSample}
+              onStreamingChange={(next) => applyChanges({ streaming: next })}
             />
           </div>
         )}
@@ -316,7 +326,10 @@ function NodeInspectorInner({
             <BranchingTab
               node={node}
               groupsForNode={groupsForNode ?? []}
+              allGroups={allGroups}
               onEditGroup={(gid) => onEditGroup?.(gid)}
+              onUpdateGroup={onUpdateGroup}
+              onDeleteGroup={onDeleteGroup}
               caseSet={caseSetForNode}
               onCaseSetChange={onCaseSetChange}
             />

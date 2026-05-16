@@ -35,6 +35,10 @@ interface Props {
   onClose: () => void;
   onFocusNode: (id: string) => void;
   onEditGroup: (gid: string) => void;
+  /** Persist a single group mutation — drives explicit add/remove membership in BranchingTab. */
+  onUpdateGroup?: (next: ExecutionGroup) => void;
+  /** Drop a group when last member is removed. */
+  onDeleteGroup?: (groupId: string) => void;
   onCaseSetChange: (anchorId: string, next: CaseSet | undefined) => void;
 }
 
@@ -61,6 +65,8 @@ export function InspectorPanel({
   onClose,
   onFocusNode,
   onEditGroup,
+  onUpdateGroup,
+  onDeleteGroup,
   onCaseSetChange,
 }: Props) {
   const inspectorSize = useResizableWidth('utopia.inspector.width', 480, 320, 900);
@@ -101,6 +107,9 @@ export function InspectorPanel({
         onClose={onClose}
         onFocusNode={onFocusNode}
         onEditGroup={onEditGroup}
+        allGroups={groups}
+        onUpdateGroup={onUpdateGroup}
+        onDeleteGroup={onDeleteGroup}
         enableCallGraph={enableCallGraph}
         caseSetForNode={caseSets.find((c) => c.anchorNodeId === selectedApiNode.id)}
         onCaseSetChange={(next) => onCaseSetChange(selectedApiNode.id, next ?? undefined)}

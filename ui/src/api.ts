@@ -56,6 +56,24 @@ export interface ApiNode {
   contentType?: string;
   shouldRun?: unknown;
   position?: { x: number; y: number };
+  streaming?: StreamingNodeOptions;
+}
+
+export type StreamingMode = 'Collect' | 'First' | 'Until';
+export type StreamParser = 'Auto' | 'Sse' | 'Ndjson' | 'Raw';
+
+export interface StreamingNodeOptions {
+  /** Termination strategy. */
+  mode?: StreamingMode;
+  /** Parser: Auto (by content-type), Sse, Ndjson, Raw. */
+  parser?: StreamParser;
+  /** JSONLogic predicate evaluated against `{message, index, elapsed}` per chunk;
+   *  Until mode advances when this becomes truthy. */
+  until?: unknown;
+  /** ISO 8601 duration string, e.g. "PT30S". */
+  timeout?: string;
+  /** Optional ceiling on number of messages. */
+  maxMessages?: number;
 }
 
 export interface Edge {
