@@ -13,7 +13,6 @@ import {
   type Node as RFNode,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { type GroupAreaData } from './GroupAreaNode';
 import { type CaseAreaData } from './CaseAreaNode';
 import { ENDPOINT_DRAG_MIME } from './EndpointPalette';
 import { InspectorPanel } from './inspector/InspectorPanel';
@@ -23,9 +22,9 @@ import { useGroupMembership } from './hooks/useGroupMembership';
 import { useNodeStatusOverlay } from './hooks/useNodeStatusOverlay';
 import { useRunExecution } from './hooks/useRunExecution';
 import { useBranchClones } from './hooks/useBranchClones';
+import { useScenarioModel } from './hooks/useScenarioModel';
 import { type AuthConfig } from './auth';
 import { GroupSettingsModal } from './GroupSettingsModal';
-import { autoLayout } from './layout';
 import { wouldCreateCycle } from './dag';
 import { normalisePath } from './App';
 import { useVisibilityTicker } from './hooks/useVisibilityTicker';
@@ -34,12 +33,7 @@ import { RunHistoryPanel } from './RunHistoryPanel';
 import { BranchDiagram } from './inspector/BranchDiagram';
 import { QuickCallPanel } from './QuickCallPanel';
 import {
-  saveScenario,
-  type ApiNode,
-  type Breakpoint,
-  type CaseSet,
   type EndpointDescriptor,
-  type ExecutionGroup,
   type Scenario,
 } from './api';
 import {
@@ -50,10 +44,8 @@ import {
   caseIdFromRf,
   caseRfId,
   collectDescendants,
-  colorForGroup,
   formatAgo,
   groupIdFromRf,
-  groupRfId,
   isApiRf,
   isBranchCloneEdge,
   isCaseRfNode,
@@ -109,16 +101,6 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     onError: setErr,
   });
   const { run, setRun, running, historyTick, sseStatus, start: onStart, resolveBreakpoint: onResolveBreakpoint } = runExec;
-  // Authoritative scenario state (full ApiNode data) — RF state is just the visual mirror.
-  const [apiNodes, setApiNodes] = useState<ApiNode[]>(scenario.nodes);
-  const [breakpoints, setBreakpoints] = useState<Breakpoint[]>(scenario.breakpoints ?? []);
-  const [startNodeIds, setStartNodeIds] = useState<string[]>(scenario.startNodeIds ?? []);
-  const [groups, setGroups] = useState<ExecutionGroup[]>(scenario.groups ?? []);
-  const [caseSets, setCaseSets] = useState<CaseSet[]>(scenario.caseSets ?? []);
-  // Editable scenario meta (business flow framing).
-  const [flowName, setFlowName] = useState<string>(scenario.name);
-  const [flowDescription, setFlowDescription] = useState<string>(scenario.description ?? '');
-  const [flowTags, setFlowTags] = useState<string[]>(scenario.tags ?? []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // null = aggregate ("all branches"); otherwise a branchKey from the current run.
@@ -126,6 +108,15 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   const [quickCallEp, setQuickCallEp] = useState<EndpointDescriptor | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  // Refs that mirror selectedNodeId / selectedIds for the model hook's mutators.
+  const selectedNodeIdRef = useRef<string | null>(null);
+  selectedNodeIdRef.current = selectedNodeId;
+  const selectedIdsRef = useRef<string[]>([]);
+  selectedIdsRef.current = selectedIds;
+  // Late-bound dirty-tracking setters — bound after useDirtyTracking runs below.
+  const dirtyBridge = useRef<(v: boolean) => void>(() => {});
+  const savingBridge = useRef<(v: boolean) => void>(() => {});
+  const lastSavedAtBridge = useRef<(v: number | null) => void>(() => {});
 
   const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -152,6 +143,30 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   const initial = useMemo(() => buildFromScenario(scenario), [scenario.id]);
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>(initial.edges);
+
+  const model = useScenarioModel({
+    scenario, nodes, edges, setNodes, setEdges,
+    dirtyBridge, savingBridge, lastSavedAtBridge,
+    setErr, onSaved,
+    selectedNodeIdRef, setSelectedNodeId,
+    selectedIdsRef, setEditingGroupId,
+  });
+  const {
+    apiNodes, setApiNodes,
+    breakpoints, setBreakpoints,
+    startNodeIds, setStartNodeIds,
+    groups, setGroups,
+    caseSets, setCaseSets,
+    flowName, setFlowName,
+    flowDescription, setFlowDescription,
+    flowTags, setFlowTags,
+    mutators: {
+      patchApiNode, toggleBreakpoint, toggleStartNode, deleteNode,
+      createEmptyGroupAt, createGroupFromSelection, deleteGroup, updateGroup, deleteEdge,
+      onAutoLayout,
+    },
+    onSave,
+  } = model;
 
   // Reset everything when scenario changes. Force-saves any pending edits to the
   // outgoing scenario before swapping so a debounce in flight doesn't lose data.
@@ -255,24 +270,6 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
 
   const selectedApiNode = apiNodes.find((n) => n.id === selectedNodeId) ?? null;
 
-  function patchApiNode(id: string, patch: Partial<ApiNode>) {
-    setApiNodes((cur) => cur.map((n) => (n.id === id ? { ...n, ...patch } : n)));
-    setDirty(true);
-  }
-
-  function toggleBreakpoint(nodeId: string) {
-    setBreakpoints((cur) => {
-      const found = cur.find((b) => b.nodeId === nodeId);
-      if (found) return cur.filter((b) => b.nodeId !== nodeId);
-      return [...cur, { nodeId, enabled: true }];
-    });
-    setDirty(true);
-  }
-
-  function toggleStartNode(nodeId: string) {
-    setStartNodeIds((cur) => (cur.includes(nodeId) ? cur.filter((x) => x !== nodeId) : [...cur, nodeId]));
-    setDirty(true);
-  }
 
   const onConnect = useCallback(
     (conn: Connection) => {
@@ -391,170 +388,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     [nodes, screenToFlowPosition, setNodes, setEdges]
   );
 
-  function deleteNode(nodeId: string) {
-    setNodes((cur) => cur.filter((n) => n.id !== nodeId));
-    setEdges((cur) => cur.filter((e) => e.source !== nodeId && e.target !== nodeId));
-    setApiNodes((cur) => cur.filter((n) => n.id !== nodeId));
-    setBreakpoints((cur) => cur.filter((b) => b.nodeId !== nodeId));
-    setStartNodeIds((cur) => cur.filter((x) => x !== nodeId));
-    setGroups((cur) => cur
-      .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((x) => x !== nodeId), mutations: g.mutations?.filter((m) => m.nodeId !== nodeId) }))
-      .filter((g) => g.nodeIds.length > 0));
-    if (selectedNodeId === nodeId) setSelectedNodeId(null);
-    setDirty(true);
-  }
 
-  function createEmptyGroupAt(canvasX: number, canvasY: number) {
-    const id = `group-${Date.now().toString(36)}`;
-    const bounds = { x: canvasX - 110, y: canvasY - 60, width: 220, height: 120 };
-    const newGroup: ExecutionGroup = {
-      id, nodeIds: [], bounds,
-      backgroundColor: colorForGroup(id),
-      repeat: { count: 1 }, mutations: [],
-    };
-    setGroups((cur) => [...cur, newGroup]);
-    setNodes((cur) => [
-      {
-        id: groupRfId(id),
-        type: 'groupArea',
-        position: { x: bounds.x, y: bounds.y },
-        style: { width: bounds.width, height: bounds.height, zIndex: -1 },
-        data: { label: id, color: newGroup.backgroundColor, count: 1 } as GroupAreaData,
-        draggable: true,
-        selectable: true,
-      },
-      ...cur,
-    ]);
-    setDirty(true);
-    setEditingGroupId(id);
-  }
-
-  function createGroupFromSelection() {
-    if (selectedIds.length === 0) return;
-    // Compute bounding box of selected api nodes; pad so the rectangle visibly contains them.
-    const selectedRfNodes = nodes.filter((n) => selectedIds.includes(n.id) && isApiRf(n));
-    if (selectedRfNodes.length === 0) return;
-    const PAD = 30;
-    const minX = Math.min(...selectedRfNodes.map((n) => n.position.x)) - PAD;
-    const minY = Math.min(...selectedRfNodes.map((n) => n.position.y)) - PAD;
-    const maxX = Math.max(...selectedRfNodes.map((n) => n.position.x + (n.measured?.width ?? 220))) + PAD;
-    const maxY = Math.max(...selectedRfNodes.map((n) => n.position.y + (n.measured?.height ?? 80))) + PAD;
-    const bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-
-    const id = `group-${Date.now().toString(36)}`;
-    const newGroup: ExecutionGroup = {
-      id,
-      nodeIds: [...selectedIds],
-      bounds,
-      backgroundColor: colorForGroup(id),
-      repeat: { count: 1 },
-      mutations: [],
-    };
-    setGroups((cur) => [...cur, newGroup]);
-
-    // Add the visual area as a low-z RF node so the user can resize / drag it.
-    setNodes((cur) => [
-      {
-        id: groupRfId(id),
-        type: 'groupArea',
-        position: { x: bounds.x, y: bounds.y },
-        style: { width: bounds.width, height: bounds.height, zIndex: -1 },
-        data: { label: id, color: newGroup.backgroundColor, count: 1 } as GroupAreaData,
-        draggable: true,
-        selectable: true,
-      },
-      ...cur,
-    ]);
-    setDirty(true);
-    setEditingGroupId(id);
-  }
-
-  function deleteGroup(groupId: string) {
-    setGroups((cur) => cur.filter((g) => g.id !== groupId));
-    setNodes((cur) => cur.filter((n) => !(isGroupRfNode(n) && groupIdFromRf(n.id) === groupId)));
-    setDirty(true);
-  }
-
-  function updateGroup(next: ExecutionGroup) {
-    setGroups((cur) => cur.map((g) => (g.id === next.id ? next : g)));
-    setNodes((cur) => cur.map((n) =>
-      isGroupRfNode(n) && groupIdFromRf(n.id) === next.id
-        ? { ...n, data: { ...(n.data as GroupAreaData), label: next.label ?? next.id, color: next.backgroundColor ?? colorForGroup(next.id), count: next.repeat?.count } }
-        : n
-    ));
-    setDirty(true);
-  }
-
-  function deleteEdge(edgeId: string) {
-    setEdges((cur) => cur.filter((e) => e.id !== edgeId));
-    setDirty(true);
-  }
-
-  async function onSave() {
-    setSaving(true); setErr(null);
-    try {
-      // Resolve final group bounds + geometric membership from the live RF state.
-      const groupRf = nodes.filter(isGroupRfNode);
-      const apiRf = nodes.filter(isApiRf);
-      const resolvedGroups: ExecutionGroup[] = groups.map((g) => {
-        const rf = groupRf.find((n) => groupIdFromRf(n.id) === g.id);
-        const bounds = rf
-          ? {
-              x: rf.position.x,
-              y: rf.position.y,
-              width: (rf.style?.width as number | undefined) ?? rf.measured?.width ?? g.bounds?.width ?? 200,
-              height: (rf.style?.height as number | undefined) ?? rf.measured?.height ?? g.bounds?.height ?? 120,
-            }
-          : g.bounds;
-        // Geometric membership: api nodes whose centre falls inside the rectangle.
-        const memberIds = bounds
-          ? apiRf
-              .filter((n) => {
-                const w = n.measured?.width ?? NEW_NODE_W;
-                const h = n.measured?.height ?? NEW_NODE_H;
-                const cx = n.position.x + w / 2;
-                const cy = n.position.y + h / 2;
-                return cx >= bounds.x && cx <= bounds.x + bounds.width
-                    && cy >= bounds.y && cy <= bounds.y + bounds.height;
-              })
-              .map((n) => n.id)
-          : g.nodeIds;
-        return { ...g, bounds, nodeIds: memberIds };
-      });
-
-      // Snapshot RF positions back into ApiNode.position so they survive reload.
-      const rfPosById = new Map(apiRf.map((n) => [n.id, n.position] as const));
-      const nodesWithPos = apiNodes.map((n) => {
-        const p = rfPosById.get(n.id);
-        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-      });
-
-      const merged: Scenario = {
-        ...scenario,
-        name: flowName.trim() || scenario.name,
-        description: flowDescription.trim() || undefined,
-        tags: flowTags.filter((t) => t.trim().length > 0),
-        nodes: nodesWithPos,
-        // Strip synthetic per-branch fan-out edges before persisting; only the canonical
-        // user-authored edges round-trip through the backend.
-        edges: edges.filter((e) => !isBranchCloneEdge(e)).map((e) => ({ from: e.source, to: e.target, mode: 'sequential' })),
-        breakpoints,
-        startNodeIds,
-        groups: resolvedGroups,
-        caseSets,
-      };
-      setGroups(resolvedGroups);
-      await saveScenario(merged);
-      setDirty(false);
-      setLastSavedAt(Date.now());
-      setErr(null);
-      onSaved(merged);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
   // Wire dirty tracking + autosave. Watch tuple is the exact 10 dep snapshot from the
   // original inline effect (apiNodes, breakpoints, startNodeIds, groups, caseSets,
   // flowName, flowDescription, flowTags, nodes, edges) — DO NOT reduce or extend without
@@ -567,15 +401,15 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
             flowName, flowDescription, flowTags, nodes, edges],
   });
   const { dirty, saving, lastSavedAt, setDirty, setSaving, setLastSavedAt, dirtyRef, saveRef: onSaveRef } = dirtyTracking;
-  // Bind bridges so the run-execution callback (defined earlier) reads current refs.
+  // Bind bridges so the run-execution callback and scenario-model mutators (defined
+  // earlier in the function body) reach the live dirtyTracking setters at call time.
   dirtyRefBridge.current = dirtyRef;
   saveRefBridge.current = onSaveRef.current;
+  dirtyBridge.current = setDirty;
+  savingBridge.current = setSaving;
+  lastSavedAtBridge.current = setLastSavedAt;
   const nowTick = useVisibilityTicker(lastSavedAt != null);
 
-  function onAutoLayout() {
-    setNodes((cur) => autoLayout(cur, edges));
-    setDirty(true);
-  }
 
   const contextMenus = useCanvasContextMenus(
     {
