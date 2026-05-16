@@ -7,14 +7,14 @@ import {
   type ExecutionGroup,
   type Run,
 } from '../api';
+import { isApiRf, isBranchCloneEdge } from '../canvas/scenarioCanvasUtils';
 import {
-  BRANCH_LANE_SPREAD,
-  branchCloneEdgeId,
-  branchCloneRfId,
-  isApiRf,
-  isBranchCloneEdge,
-  isBranchCloneRf,
-} from '../canvas/scenarioCanvasUtils';
+  buildCloneEdges,
+  buildCloneNodes,
+  planBranchFanOut,
+  reconcileCloneEdges,
+  reconcileCloneNodes,
+} from '../canvas/branchClones';
 
 export interface UseBranchClonesArgs {
   run: Run | null;
@@ -78,153 +78,20 @@ export function useBranchClones({
   // Branch fan-out: spawn synthetic RF nodes for each (in-group node × branch) so the
   // playground literally shows each iteration as its own copy of the API. Originals are
   // hidden while branches exist; cleared back when run is reset. Edges are re-routed.
+  //
+  // Two setState calls run sequentially (nodes then edges) — deliberate, edge reconcile
+  // reads inBranchOriginals which is plain data, not RF state. RF batches them safely.
   useEffect(() => {
-    // Map nodeId → first group it belongs to (for adjacency classification).
-    const inGroupOf = new Map<string, ExecutionGroup>();
-    for (const g of groups) {
-      for (const nid of g.nodeIds) {
-        if (!inGroupOf.has(nid)) inGroupOf.set(nid, g);
-      }
-    }
-    // groupId → ordered branchKeys observed in run
-    const branchesByGroup = new Map<string, string[]>();
-    if (run) {
-      for (const r of run.nodeResults) {
-        const fullKey = branchKey(r);
-        if (fullKey === '') continue;
-        for (const seg of r.branchPath ?? []) {
-          const m = /^(.+)#(\d+)$/.exec(seg);
-          if (!m) continue;
-          const arr = branchesByGroup.get(m[1]) ?? [];
-          if (!arr.includes(fullKey)) arr.push(fullKey);
-          branchesByGroup.set(m[1], arr);
-        }
-      }
-      for (const [, arr] of branchesByGroup) arr.sort();
-    }
-    const inBranchOriginals = new Set<string>();
-    for (const [gid] of branchesByGroup) {
-      const grp = groups.find((g) => g.id === gid);
-      if (grp) for (const nid of grp.nodeIds) inBranchOriginals.add(nid);
-    }
-
+    const plan = planBranchFanOut(run, groups);
     setNodes((cur) => {
       const apiRf = cur.filter(isApiRf);
-      const desiredClones: RFNode[] = [];
-      for (const [gid, branches] of branchesByGroup) {
-        const grp = groups.find((g) => g.id === gid);
-        if (!grp) continue;
-        const N = branches.length;
-        for (const nid of grp.nodeIds) {
-          const orig = apiRf.find((n) => n.id === nid);
-          if (!orig) continue;
-          for (let i = 0; i < N; i++) {
-            const k = branches[i];
-            const offset = (i - (N - 1) / 2) * BRANCH_LANE_SPREAD;
-            // Resolve a friendly per-iteration label (e.g. "g_alpha ×2") inline so we don't
-            // depend on branchLabelFor's hook scope here.
-            const segs = k.split('/');
-            const niceSegs: string[] = [];
-            for (const seg of segs) {
-              const rm = /^(.+)#(\d+)$/.exec(seg);
-              if (rm) {
-                const grpForSeg = groups.find((g) => g.id === rm[1]);
-                niceSegs.push(`${grpForSeg?.label ?? rm[1]} ×${rm[2]}`);
-              } else {
-                niceSegs.push(seg);
-              }
-            }
-            desiredClones.push({
-              id: branchCloneRfId(nid, k),
-              type: 'api',
-              position: { x: orig.position.x + offset, y: orig.position.y },
-              data: { ...orig.data, branchLabel: niceSegs.join(' › ') },
-              draggable: false,
-              selectable: true,
-            });
-          }
-        }
-      }
-      // Idempotent: bail if nothing changed (clones equal + hidden flags equal).
-      const existingClones = cur.filter(isBranchCloneRf);
-      let cloneSetChanged = existingClones.length !== desiredClones.length;
-      if (!cloneSetChanged) {
-        for (const d of desiredClones) {
-          const found = existingClones.find((n) => n.id === d.id);
-          if (!found) { cloneSetChanged = true; break; }
-          if (found.position.x !== d.position.x || found.position.y !== d.position.y) {
-            cloneSetChanged = true; break;
-          }
-        }
-      }
-      let hiddenChanged = false;
-      for (const n of cur) {
-        if (!isApiRf(n)) continue;
-        const shouldHide = inBranchOriginals.has(n.id);
-        if (!!n.hidden !== shouldHide) { hiddenChanged = true; break; }
-      }
-      if (!cloneSetChanged && !hiddenChanged) return cur;
-      const others = cur.filter((n) => !isBranchCloneRf(n));
-      const updatedOthers = others.map((n) => {
-        if (!isApiRf(n)) return n;
-        const shouldHide = inBranchOriginals.has(n.id);
-        if (!!n.hidden === shouldHide) return n;
-        return { ...n, hidden: shouldHide };
-      });
-      return [...updatedOthers, ...desiredClones];
+      const desired = buildCloneNodes(apiRf, plan, groups);
+      return reconcileCloneNodes(cur, desired, plan.inBranchOriginals);
     });
-
     setEdges((cur) => {
-      const origEdges = cur.filter((e) => !isBranchCloneEdge(e));
-      const desiredCloneEdges: RFEdge[] = [];
-      for (const e of origEdges) {
-        const uIn = inBranchOriginals.has(e.source);
-        const vIn = inBranchOriginals.has(e.target);
-        if (!uIn && !vIn) continue;
-        const gOfU = inGroupOf.get(e.source);
-        const gOfV = inGroupOf.get(e.target);
-        let keys: string[] = [];
-        if (uIn && vIn && gOfU && gOfV && gOfU.id === gOfV.id) {
-          keys = branchesByGroup.get(gOfU.id) ?? [];
-        } else if (uIn && !vIn && gOfU) {
-          keys = branchesByGroup.get(gOfU.id) ?? [];
-        } else if (!uIn && vIn && gOfV) {
-          keys = branchesByGroup.get(gOfV.id) ?? [];
-        } else {
-          continue; // cross-group adjacency — skip in v1
-        }
-        for (const k of keys) {
-          const sourceId = uIn ? branchCloneRfId(e.source, k) : e.source;
-          const targetId = vIn ? branchCloneRfId(e.target, k) : e.target;
-          desiredCloneEdges.push({
-            id: branchCloneEdgeId(e.id, k),
-            source: sourceId,
-            target: targetId,
-          });
-        }
-      }
-      const updatedOrigs = origEdges.map((e) => {
-        const uIn = inBranchOriginals.has(e.source);
-        const vIn = inBranchOriginals.has(e.target);
-        const shouldHide = uIn || vIn;
-        if (!!e.hidden === shouldHide) return e;
-        return { ...e, hidden: shouldHide };
-      });
-      const existingClones = cur.filter(isBranchCloneEdge);
-      let cloneSetChanged = existingClones.length !== desiredCloneEdges.length;
-      if (!cloneSetChanged) {
-        for (const d of desiredCloneEdges) {
-          const found = existingClones.find((e) =>
-            e.id === d.id && e.source === d.source && e.target === d.target);
-          if (!found) { cloneSetChanged = true; break; }
-        }
-      }
-      let hiddenChanged = false;
-      for (let i = 0; i < origEdges.length; i++) {
-        if (!!origEdges[i].hidden !== !!updatedOrigs[i].hidden) { hiddenChanged = true; break; }
-      }
-      if (!cloneSetChanged && !hiddenChanged) return cur;
-      return [...updatedOrigs, ...desiredCloneEdges];
+      const orig = cur.filter((e) => !isBranchCloneEdge(e));
+      const desired = buildCloneEdges(orig, plan);
+      return reconcileCloneEdges(cur, desired, plan.inBranchOriginals);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run, groups, apiNodes]);

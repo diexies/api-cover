@@ -26,6 +26,7 @@ import { useScenarioModel } from './hooks/useScenarioModel';
 import { useScenarioHistory, type ScenarioSnapshot } from './hooks/useScenarioHistory';
 import { type AuthConfig } from './auth';
 import { GroupSettingsModal } from './GroupSettingsModal';
+import { BulkEditModal } from './BulkEditModal';
 import { wouldCreateCycle } from './dag';
 import { normalisePath } from './App';
 import { useVisibilityTicker } from './hooks/useVisibilityTicker';
@@ -34,6 +35,7 @@ import { RunHistoryPanel } from './RunHistoryPanel';
 import { BranchDiagram } from './inspector/BranchDiagram';
 import { QuickCallPanel } from './QuickCallPanel';
 import {
+  type ApiNode,
   type EndpointDescriptor,
   type Scenario,
 } from './api';
@@ -109,6 +111,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   const [quickCallEp, setQuickCallEp] = useState<EndpointDescriptor | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   // Refs that mirror selectedNodeId / selectedIds for the model hook's mutators.
   const selectedNodeIdRef = useRef<string | null>(null);
   selectedNodeIdRef.current = selectedNodeId;
@@ -593,10 +596,13 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           </div>
         )}
       </div>
-      {selectedIds.length > 1 && !groups.some((g) => g.nodeIds.some((nid) => selectedIds.includes(nid))) && (
+      {selectedIds.length > 1 && (
         <div className="selection-bar">
           <span>{selectedIds.length} nodes selected</span>
-          <button className="btn primary" onClick={createGroupFromSelection}>⊞ Create group</button>
+          {!groups.some((g) => g.nodeIds.some((nid) => selectedIds.includes(nid))) && (
+            <button className="btn primary" onClick={createGroupFromSelection}>⊞ Create group</button>
+          )}
+          <button className="btn" onClick={() => setBulkEditOpen(true)}>✎ Bulk edit</button>
         </div>
       )}
       {selectedGroupId && (
@@ -613,6 +619,35 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           onSave={(next) => updateGroup(next)}
           onDelete={() => deleteGroup(editingGroupId)}
           onClose={() => setEditingGroupId(null)}
+        />
+      )}
+      {bulkEditOpen && (
+        <BulkEditModal
+          selectedIds={selectedIds}
+          apiNodes={apiNodes}
+          onApply={(patches) => {
+            // Group patches by nodeId and merge with the existing field map.
+            const byNode = new Map<string, typeof patches>();
+            for (const p of patches) {
+              const arr = byNode.get(p.nodeId) ?? [];
+              arr.push(p);
+              byNode.set(p.nodeId, arr);
+            }
+            for (const [nodeId, ps] of byNode) {
+              const target = apiNodes.find((n) => n.id === nodeId);
+              if (!target) continue;
+              const next: Partial<ApiNode> = {};
+              for (const p of ps) {
+                const fieldKey = p.field === 'header' ? 'headers'
+                  : p.field === 'queryParameter' ? 'queryParameters'
+                  : 'pathParameters';
+                const current = (next[fieldKey] ?? target[fieldKey] ?? {}) as Record<string, unknown>;
+                next[fieldKey] = { ...current, [p.key]: p.value };
+              }
+              patchApiNode(nodeId, next);
+            }
+          }}
+          onClose={() => setBulkEditOpen(false)}
         />
       )}
       <BranchDiagram
