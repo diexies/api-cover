@@ -13,14 +13,17 @@ import {
   type Node as RFNode,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { type ApiNodeData } from './ApiNodeView';
-import { computeMembership, type Rect as MembershipRect } from './canvas/computeMembership';
 import { type GroupAreaData } from './GroupAreaNode';
 import { type CaseAreaData } from './CaseAreaNode';
-import { ContextMenu, type MenuItem } from './ContextMenu';
 import { ENDPOINT_DRAG_MIME } from './EndpointPalette';
 import { InspectorPanel } from './inspector/InspectorPanel';
-import { authToRunOptions, type AuthConfig } from './auth';
+import { useCanvasContextMenus } from './canvas/CanvasContextMenus';
+import { useDirtyTracking } from './hooks/useDirtyTracking';
+import { useGroupMembership } from './hooks/useGroupMembership';
+import { useNodeStatusOverlay } from './hooks/useNodeStatusOverlay';
+import { useRunExecution } from './hooks/useRunExecution';
+import { useBranchClones } from './hooks/useBranchClones';
+import { type AuthConfig } from './auth';
 import { GroupSettingsModal } from './GroupSettingsModal';
 import { autoLayout } from './layout';
 import { wouldCreateCycle } from './dag';
@@ -31,43 +34,28 @@ import { RunHistoryPanel } from './RunHistoryPanel';
 import { BranchDiagram } from './inspector/BranchDiagram';
 import { QuickCallPanel } from './QuickCallPanel';
 import {
-  aggregateNodeResult,
-  branchKey,
-  getNodeResult,
-  getRun,
   saveScenario,
-  startRun,
-  subscribeRunEvents,
   type ApiNode,
   type Breakpoint,
   type CaseSet,
   type EndpointDescriptor,
   type ExecutionGroup,
-  type NodeResult,
-  type NodeStatus,
-  type Run,
-  type RunEvent,
   type Scenario,
 } from './api';
 import {
-  BRANCH_LANE_SPREAD,
   NEW_NODE_H,
   NEW_NODE_W,
   aggregateBranchStatus,
-  branchCloneEdgeId,
-  branchCloneRfId,
   buildFromScenario,
   caseIdFromRf,
   caseRfId,
   collectDescendants,
   colorForGroup,
   formatAgo,
-  groupHashClass,
   groupIdFromRf,
   groupRfId,
   isApiRf,
   isBranchCloneEdge,
-  isBranchCloneRf,
   isCaseRfNode,
   isGroupRfNode,
   isStructuralRf,
@@ -102,26 +90,25 @@ export function ScenarioCanvas(props: Props) {
 }
 
 function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint, endpointStatsByKey, auth, enableCallGraph, onSaved }: Props) {
-  const [run, setRun] = useState<Run | null>(null);
-  const [running, setRunning] = useState(false);
-  // Bumped whenever a run reaches a terminal state so the RunHistoryPanel refetches
-  // its disk-persisted list to include the just-finished run.
-  const [historyTick, setHistoryTick] = useState(0);
   const [err, setErr] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const nowTick = useVisibilityTicker(lastSavedAt != null);
-  const unsubRef = useRef<(() => void) | null>(null);
-  const [sseStatus, setSseStatus] = useState<import('./api').SseStatus | null>(null);
-  const onSaveRef = useRef<() => Promise<void>>(async () => {});
-  const dirtyRef = useRef(false);
-  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
-  // Snapshot of API node bounds and group bounds from the prior membership pass — lets the
-  // memoised recompute below skip groups whose neighbourhood didn't move.
-  const prevApiPositionsRef = useRef<Map<string, MembershipRect>>(new Map());
-  const prevGroupBoundsRef = useRef<Map<string, MembershipRect>>(new Map());
-
+  // Lazy bridges between useRunExecution (consumes a "force save" callback) and
+  // useDirtyTracking (produces dirtyRef + saveRef). Both refs are populated below
+  // after useDirtyTracking runs; callbacks defined here only dereference them at
+  // call time, after init is complete.
+  const dirtyRefBridge = useRef<{ current: boolean }>({ current: false });
+  const saveRefBridge = useRef<() => Promise<void>>(async () => {});
+  const forceSaveIfDirty = useCallback(async () => {
+    if (dirtyRefBridge.current.current) {
+      try { await saveRefBridge.current(); } catch { throw new Error('save-failed'); }
+    }
+  }, []);
+  const runExec = useRunExecution({
+    scenarioId: scenario.id,
+    auth,
+    forceSaveIfDirty,
+    onError: setErr,
+  });
+  const { run, setRun, running, historyTick, sseStatus, start: onStart, resolveBreakpoint: onResolveBreakpoint } = runExec;
   // Authoritative scenario state (full ApiNode data) — RF state is just the visual mirror.
   const [apiNodes, setApiNodes] = useState<ApiNode[]>(scenario.nodes);
   const [breakpoints, setBreakpoints] = useState<Breakpoint[]>(scenario.breakpoints ?? []);
@@ -139,9 +126,6 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   const [quickCallEp, setQuickCallEp] = useState<EndpointDescriptor | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-
-  type Menu = { x: number; y: number; items: MenuItem[] } | null;
-  const [menu, setMenu] = useState<Menu>(null);
 
   const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -184,70 +168,17 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     setFlowName(scenario.name);
     setFlowDescription(scenario.description ?? '');
     setFlowTags(scenario.tags ?? []);
-    setRun(null);
     setErr(null);
-    setRunning(false);
     setDirty(false);
     setLastSavedAt(null);
     setSelectedNodeId(null);
     setSelectedBranchKey(null);
-    unsubRef.current?.();
-    unsubRef.current = null;
+    runExec.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenario.id]);
 
-  useEffect(() => () => { unsubRef.current?.(); unsubRef.current = null; }, []);
 
-  // Guard against accidental tab close / reload while edits are pending the
-  // 800ms debounce or while a save is in flight. Browsers ignore custom text
-  // and show their own "Leave site?" prompt — non-empty returnValue is enough
-  // to trigger it. No-op when the canvas is clean.
-  useEffect(() => {
-    if (!dirty && !saving) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [dirty, saving]);
-
-  // Live geometric membership: recompute every group's nodeIds from current positions vs
-  // current bounds. Memoised via prev-position snapshot — when no API node moved and no
-  // group bounds changed, the helper returns the same groups reference and React bails.
-  useEffect(() => {
-    const apiNodes = nodes.filter(isApiRf).map((n) => ({
-      id: n.id,
-      x: n.position.x,
-      y: n.position.y,
-      w: n.measured?.width ?? NEW_NODE_W,
-      h: n.measured?.height ?? NEW_NODE_H,
-    }));
-    const groupSamples = nodes.filter(isGroupRfNode).map((rf) => {
-      const id = groupIdFromRf(rf.id);
-      return {
-        id,
-        bounds: {
-          x: rf.position.x,
-          y: rf.position.y,
-          width: (rf.style?.width as number | undefined) ?? rf.measured?.width ?? 200,
-          height: (rf.style?.height as number | undefined) ?? rf.measured?.height ?? 120,
-        },
-      };
-    });
-    setGroups((cur) => {
-      const out = computeMembership({
-        apiNodes,
-        groupSamples,
-        groups: cur,
-        prevPositions: prevApiPositionsRef.current,
-        prevGroupBounds: prevGroupBoundsRef.current,
-      });
-      prevApiPositionsRef.current = out.nextPositions;
-      prevGroupBoundsRef.current = out.nextGroupBounds;
-      return out.groups;
-    });
-  }, [nodes]);
+  useGroupMembership({ nodes, setNodes, setGroups, groups, run });
 
   // Case-set area rectangles. Derived: for each CaseSet, bounding box of (anchor + downstream
   // reachable nodes) padded by PAD. Re-emitted whenever caseSets, edges, or node positions
@@ -312,354 +243,15 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseSets, edges, nodes]);
 
-  // Branch keys present in the current run (excluding root). Drives the picker.
-  const branchKeys = useMemo(() => {
-    if (!run) return [] as string[];
-    const set = new Set<string>();
-    for (const r of run.nodeResults) {
-      const k = branchKey(r);
-      if (k.length > 0) set.add(k);
-    }
-    return [...set].sort();
-  }, [run]);
+  const branchClones = useBranchClones({
+    run, groups, caseSets, apiNodes, setNodes, setEdges,
+    selectedBranchKey, setSelectedBranchKey,
+  });
+  const { branchKeys, branchLabelFor } = branchClones;
 
-  // Drop selectedBranchKey if it disappears (e.g. run cleared or replaced).
-  useEffect(() => {
-    if (selectedBranchKey != null && !branchKeys.includes(selectedBranchKey)) {
-      setSelectedBranchKey(null);
-    }
-  }, [branchKeys, selectedBranchKey]);
-
-  // Per-group iteration progress derived from run.nodeResults whose branchPath segments
-  // match `<groupId>#<n>`. Drives the live counter + pulse on the group-area node.
-  // Idempotent: only writes back into the RF node `data` when the values change.
-  useEffect(() => {
-    type Tally = { runningIter: number; totalIter: number; passed: number; failed: number; isRunning: boolean };
-    const byGroup = new Map<string, Tally>();
-    for (const g of groups) {
-      const total = Math.max(1, g.repeat?.count ?? 1);
-      byGroup.set(g.id, { runningIter: 0, totalIter: total, passed: 0, failed: 0, isRunning: false });
-    }
-    if (run) {
-      for (const r of run.nodeResults) {
-        for (const seg of r.branchPath ?? []) {
-          const m = /^(.+)#(\d+)$/.exec(seg);
-          if (!m) continue;
-          const tally = byGroup.get(m[1]);
-          if (!tally) continue;
-          const idx = parseInt(m[2], 10);
-          if (idx > tally.runningIter) tally.runningIter = idx;
-          if (r.status === 'succeeded') tally.passed++;
-          else if (r.status === 'failed') tally.failed++;
-          if (r.status === 'running' || r.status === 'paused') tally.isRunning = true;
-        }
-      }
-    }
-    setNodes((cur) => {
-      let changed = false;
-      const next = cur.map((n) => {
-        if (!isGroupRfNode(n)) return n;
-        const gid = groupIdFromRf(n.id);
-        const tally = byGroup.get(gid);
-        if (!tally) return n;
-        const data = n.data as GroupAreaData;
-        const desired: Partial<GroupAreaData> = {
-          runningIter: tally.runningIter,
-          totalIter: tally.totalIter,
-          iterPassed: tally.passed,
-          iterFailed: tally.failed,
-          isRunning: tally.isRunning,
-        };
-        if (data.runningIter === desired.runningIter
-          && data.totalIter === desired.totalIter
-          && data.iterPassed === desired.iterPassed
-          && data.iterFailed === desired.iterFailed
-          && data.isRunning === desired.isRunning) return n;
-        changed = true;
-        return { ...n, data: { ...data, ...desired } };
-      });
-      return changed ? next : cur;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, groups]);
-
-  // Branch fan-out: spawn synthetic RF nodes for each (in-group node × branch) so the
-  // playground literally shows each iteration as its own copy of the API. Originals are
-  // hidden while branches exist; cleared back when run is reset. Edges are re-routed:
-  // upstream → each branch's first node, branch lanes run sequential, last → downstream.
-  useEffect(() => {
-    // Map nodeId → first group it belongs to (for adjacency classification).
-    const inGroupOf = new Map<string, ExecutionGroup>();
-    for (const g of groups) {
-      for (const nid of g.nodeIds) {
-        if (!inGroupOf.has(nid)) inGroupOf.set(nid, g);
-      }
-    }
-    // groupId → ordered branchKeys observed in run
-    const branchesByGroup = new Map<string, string[]>();
-    if (run) {
-      for (const r of run.nodeResults) {
-        const fullKey = branchKey(r);
-        if (fullKey === '') continue;
-        for (const seg of r.branchPath ?? []) {
-          const m = /^(.+)#(\d+)$/.exec(seg);
-          if (!m) continue;
-          const arr = branchesByGroup.get(m[1]) ?? [];
-          if (!arr.includes(fullKey)) arr.push(fullKey);
-          branchesByGroup.set(m[1], arr);
-        }
-      }
-      for (const [, arr] of branchesByGroup) arr.sort();
-    }
-    const inBranchOriginals = new Set<string>();
-    for (const [gid] of branchesByGroup) {
-      const grp = groups.find((g) => g.id === gid);
-      if (grp) for (const nid of grp.nodeIds) inBranchOriginals.add(nid);
-    }
-
-    setNodes((cur) => {
-      const apiRf = cur.filter(isApiRf);
-      const desiredClones: RFNode[] = [];
-      for (const [gid, branches] of branchesByGroup) {
-        const grp = groups.find((g) => g.id === gid);
-        if (!grp) continue;
-        const N = branches.length;
-        for (const nid of grp.nodeIds) {
-          const orig = apiRf.find((n) => n.id === nid);
-          if (!orig) continue;
-          for (let i = 0; i < N; i++) {
-            const k = branches[i];
-            const offset = (i - (N - 1) / 2) * BRANCH_LANE_SPREAD;
-            // Resolve a friendly per-iteration label (e.g. "g_alpha ×2") inline so we don't
-            // depend on branchLabelFor's hook scope here.
-            const segs = k.split('/');
-            const niceSegs: string[] = [];
-            for (const seg of segs) {
-              const rm = /^(.+)#(\d+)$/.exec(seg);
-              if (rm) {
-                const grpForSeg = groups.find((g) => g.id === rm[1]);
-                niceSegs.push(`${grpForSeg?.label ?? rm[1]} ×${rm[2]}`);
-              } else {
-                niceSegs.push(seg);
-              }
-            }
-            desiredClones.push({
-              id: branchCloneRfId(nid, k),
-              type: 'api',
-              position: { x: orig.position.x + offset, y: orig.position.y },
-              data: { ...orig.data, branchLabel: niceSegs.join(' › ') },
-              draggable: false,
-              selectable: true,
-            });
-          }
-        }
-      }
-      // Idempotent: bail if nothing changed (clones equal + hidden flags equal).
-      const existingClones = cur.filter(isBranchCloneRf);
-      let cloneSetChanged = existingClones.length !== desiredClones.length;
-      if (!cloneSetChanged) {
-        for (const d of desiredClones) {
-          const found = existingClones.find((n) => n.id === d.id);
-          if (!found) { cloneSetChanged = true; break; }
-          if (found.position.x !== d.position.x || found.position.y !== d.position.y) {
-            cloneSetChanged = true; break;
-          }
-        }
-      }
-      let hiddenChanged = false;
-      for (const n of cur) {
-        if (!isApiRf(n)) continue;
-        const shouldHide = inBranchOriginals.has(n.id);
-        if (!!n.hidden !== shouldHide) { hiddenChanged = true; break; }
-      }
-      if (!cloneSetChanged && !hiddenChanged) return cur;
-      const others = cur.filter((n) => !isBranchCloneRf(n));
-      const updatedOthers = others.map((n) => {
-        if (!isApiRf(n)) return n;
-        const shouldHide = inBranchOriginals.has(n.id);
-        if (!!n.hidden === shouldHide) return n;
-        return { ...n, hidden: shouldHide };
-      });
-      return [...updatedOthers, ...desiredClones];
-    });
-
-    setEdges((cur) => {
-      const origEdges = cur.filter((e) => !isBranchCloneEdge(e));
-      const desiredCloneEdges: RFEdge[] = [];
-      for (const e of origEdges) {
-        const uIn = inBranchOriginals.has(e.source);
-        const vIn = inBranchOriginals.has(e.target);
-        if (!uIn && !vIn) continue;
-        const gOfU = inGroupOf.get(e.source);
-        const gOfV = inGroupOf.get(e.target);
-        let keys: string[] = [];
-        if (uIn && vIn && gOfU && gOfV && gOfU.id === gOfV.id) {
-          keys = branchesByGroup.get(gOfU.id) ?? [];
-        } else if (uIn && !vIn && gOfU) {
-          keys = branchesByGroup.get(gOfU.id) ?? [];
-        } else if (!uIn && vIn && gOfV) {
-          keys = branchesByGroup.get(gOfV.id) ?? [];
-        } else {
-          continue; // cross-group adjacency — skip in v1
-        }
-        for (const k of keys) {
-          const sourceId = uIn ? branchCloneRfId(e.source, k) : e.source;
-          const targetId = vIn ? branchCloneRfId(e.target, k) : e.target;
-          desiredCloneEdges.push({
-            id: branchCloneEdgeId(e.id, k),
-            source: sourceId,
-            target: targetId,
-          });
-        }
-      }
-      const updatedOrigs = origEdges.map((e) => {
-        const uIn = inBranchOriginals.has(e.source);
-        const vIn = inBranchOriginals.has(e.target);
-        const shouldHide = uIn || vIn;
-        if (!!e.hidden === shouldHide) return e;
-        return { ...e, hidden: shouldHide };
-      });
-      const existingClones = cur.filter(isBranchCloneEdge);
-      let cloneSetChanged = existingClones.length !== desiredCloneEdges.length;
-      if (!cloneSetChanged) {
-        for (const d of desiredCloneEdges) {
-          const found = existingClones.find((e) =>
-            e.id === d.id && e.source === d.source && e.target === d.target);
-          if (!found) { cloneSetChanged = true; break; }
-        }
-      }
-      let hiddenChanged = false;
-      for (let i = 0; i < origEdges.length; i++) {
-        if (!!origEdges[i].hidden !== !!updatedOrigs[i].hidden) { hiddenChanged = true; break; }
-      }
-      if (!cloneSetChanged && !hiddenChanged) return cur;
-      return [...updatedOrigs, ...desiredCloneEdges];
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, groups, apiNodes]);
-
-  // Pretty label for a branchKey. Recognises three segment shapes:
-  //   1. `<groupId>#<n>` — repeat-iteration token emitted by the engine fan-out
-  //   2. CaseVariant id → looked up in `caseSets`
-  //   3. Anything else → printed as-is
-  const branchLabelFor = useCallback((key: string): string => {
-    const segs = key.split('/');
-    const labels: string[] = [];
-    for (const seg of segs) {
-      const repeatMatch = /^(.+)#(\d+)$/.exec(seg);
-      if (repeatMatch) {
-        const grp = groups.find((g) => g.id === repeatMatch[1]);
-        const grpLabel = grp?.label ?? repeatMatch[1];
-        labels.push(`${grpLabel} ×${repeatMatch[2]}`);
-        continue;
-      }
-      const found = caseSets
-        .flatMap((c) => c.variants.map((v) => ({ cs: c, v })))
-        .find(({ v }) => v.id === seg);
-      labels.push(found ? found.v.label : seg);
-    }
-    return labels.join(' › ');
-  }, [caseSets, groups]);
-
-  // Overlay live status + breakpoint flag onto RF nodes / edges. Also tag each node with
-  // the group it belongs to (if any) so we can render a coloured ring around it.
-  useEffect(() => {
-    const idle = run === null;
-    const bpSet = new Set(breakpoints.filter((b) => b.enabled !== false).map((b) => b.nodeId));
-    const nodeToGroup = new Map<string, string>();
-    const nodeGroupAll = new Map<string, ExecutionGroup[]>();
-    for (const g of groups) {
-      for (const nid of g.nodeIds) {
-        nodeToGroup.set(nid, g.id);
-        if (!nodeGroupAll.has(nid)) nodeGroupAll.set(nid, []);
-        nodeGroupAll.get(nid)!.push(g);
-      }
-    }
-    const caseAnchorOf = new Map<string, CaseSet>();
-    for (const cs of caseSets) {
-      if (cs.variants && cs.variants.length > 0) caseAnchorOf.set(cs.anchorNodeId, cs);
-    }
-    // Branch-filtered status resolver. Three shapes feed in:
-    //   1. Branch-clone RF id (`<nodeId>@@<branchKey>`) → look up that exact branch record.
-    //   2. Real api node id, no chip selected → aggregate across all branches (idle/glance view).
-    //   3. Real api node id, chip selected → prefer that branch's record, else root, else dim.
-    function resolveResult(rfNodeId: string): { result: NodeResult | undefined; offBranch: boolean } {
-      const cloned = parseBranchCloneRf(rfNodeId);
-      if (cloned) {
-        const result = getNodeResult(run, cloned.nodeId, cloned.branchKey);
-        const off = selectedBranchKey != null && selectedBranchKey !== cloned.branchKey;
-        return { result, offBranch: off };
-      }
-      if (selectedBranchKey == null) {
-        return { result: aggregateNodeResult(run, rfNodeId), offBranch: false };
-      }
-      const onBranch = getNodeResult(run, rfNodeId, selectedBranchKey);
-      if (onBranch) return { result: onBranch, offBranch: false };
-      const onRoot = getNodeResult(run, rfNodeId, '');
-      if (onRoot) return { result: onRoot, offBranch: false };
-      return { result: undefined, offBranch: run !== null };
-    }
-
-    setNodes((current) =>
-      current.map((n) => {
-        if (isStructuralRf(n)) return n; // group / case areas don't carry status
-        const cloned = parseBranchCloneRf(n.id);
-        const lookupId = cloned ? cloned.nodeId : n.id;
-        const { result, offBranch } = resolveResult(n.id);
-        const status: NodeStatus = result?.status ?? 'pending';
-        const gid = nodeToGroup.get(lookupId);
-        const myGroups = nodeGroupAll.get(lookupId) ?? [];
-        const cartesian = myGroups.length === 0 ? 1 : myGroups.reduce((a, g) => a * Math.max(1, g.repeat?.count ?? 1), 1);
-        const anchor = caseAnchorOf.get(lookupId);
-        // Clones already live inside a fan-out lane; the group "ring" wrapper would re-tint them
-        // and overlap visually, so suppress it for clones (the original gets the ring instead).
-        const groupCls = !cloned && gid
-          ? `node-in-group group-${groupHashClass(gid)}${myGroups.length > 1 ? ' node-overlapped' : ''}`
-          : '';
-        const dimCls = offBranch ? 'node-off-branch' : '';
-        const cloneCls = cloned ? 'node-branch-clone' : '';
-        const className = [groupCls, dimCls, cloneCls].filter(Boolean).join(' ') || undefined;
-        return {
-          ...n,
-          className,
-          data: {
-            ...n.data,
-            status,
-            response: result?.response?.body,
-            error: result?.error,
-            idle,
-            hasBreakpoint: !cloned && bpSet.has(lookupId),
-            groupCount: cloned ? 0 : myGroups.length,
-            cartesianIterations: cloned ? 1 : cartesian,
-            isStart: !cloned && startNodeIds.includes(lookupId),
-            caseVariantCount: cloned ? 0 : (anchor?.variants.length ?? 0),
-            caseAnchorColor: cloned ? undefined : anchor?.backgroundColor,
-          },
-        };
-      })
-    );
-    setEdges((current) =>
-      current.map((e) => {
-        const from = resolveResult(e.source);
-        const to = resolveResult(e.target);
-        const fromStatus = from.result?.status;
-        const toStatus = to.result?.status;
-        const offBranch = from.offBranch || to.offBranch;
-        const active = !offBranch && (fromStatus === 'running'
-          || (fromStatus === 'succeeded' && (toStatus === 'pending' || toStatus === 'running')));
-        const traversed = !offBranch && fromStatus === 'succeeded'
-          && (toStatus === 'succeeded' || toStatus === 'running' || toStatus === 'failed');
-        const cls = [traversed ? 'edge-traversed' : '', offBranch ? 'edge-off-branch' : '']
-          .filter(Boolean).join(' ');
-        return {
-          ...e,
-          animated: active,
-          className: cls,
-        };
-      })
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, breakpoints, groups, caseSets, startNodeIds, selectedBranchKey]);
+  useNodeStatusOverlay({
+    run, breakpoints, groups, caseSets, startNodeIds, selectedBranchKey, setNodes, setEdges,
+  });
 
   const selectedApiNode = apiNodes.find((n) => n.id === selectedNodeId) ?? null;
 
@@ -963,265 +555,61 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       setSaving(false);
     }
   }
-  // Latest onSave reference for cleanup-time force-saves (scenario swap).
-  useEffect(() => { onSaveRef.current = onSave; });
-
-  // Debounced auto-save. Re-armed by every dependency change; cleanup cancels
-  // a pending fire if a new edit lands within the window. Skips while running
-  // (run engine writes ephemeral state) or while a save is already in flight
-  // (prevents overlap; the post-save dirty flip will re-arm if needed). Backoff
-  // bumps to 5s when the last attempt errored to avoid hammering a downed host.
-  useEffect(() => {
-    if (!dirty || running || saving) return;
-    const delay = err ? 5000 : 800;
-    const t = setTimeout(() => { void onSave(); }, delay);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, running, saving, err,
-      apiNodes, breakpoints, startNodeIds, groups, caseSets,
-      flowName, flowDescription, flowTags, nodes, edges]);
+  // Wire dirty tracking + autosave. Watch tuple is the exact 10 dep snapshot from the
+  // original inline effect (apiNodes, breakpoints, startNodeIds, groups, caseSets,
+  // flowName, flowDescription, flowTags, nodes, edges) — DO NOT reduce or extend without
+  // verifying every mutator marks dirty by hand.
+  const dirtyTracking = useDirtyTracking({
+    running,
+    err,
+    save: onSave,
+    watch: [apiNodes, breakpoints, startNodeIds, groups, caseSets,
+            flowName, flowDescription, flowTags, nodes, edges],
+  });
+  const { dirty, saving, lastSavedAt, setDirty, setSaving, setLastSavedAt, dirtyRef, saveRef: onSaveRef } = dirtyTracking;
+  // Bind bridges so the run-execution callback (defined earlier) reads current refs.
+  dirtyRefBridge.current = dirtyRef;
+  saveRefBridge.current = onSaveRef.current;
+  const nowTick = useVisibilityTicker(lastSavedAt != null);
 
   function onAutoLayout() {
     setNodes((cur) => autoLayout(cur, edges));
     setDirty(true);
   }
 
-  async function onStart() {
-    setErr(null);
-    // Auto-save handles edits within 800ms, but the user may hit Run faster.
-    // Force-save synchronously so the run sees the latest scenario.
-    if (dirty) {
-      try { await onSave(); } catch { return; /* err state already set */ }
-    }
-    setRunning(true);
-    try {
-      const authOpts = authToRunOptions(auth);
-      const started = await startRun(scenario.id, {
-        breakpointsEnabled: true,
-        headers: authOpts.headers,
-        queryParameters: authOpts.queryParameters,
-      });
-      setRun(started);
-      unsubRef.current?.();
-      unsubRef.current = subscribeRunEvents(started.id, handleEvent, {
-        onError: () => { getRun(started.id).then(setRun).catch(() => {}); },
-        onStatus: (s) => setSseStatus(s),
-      });
-    } catch (e) {
-      setErr((e as Error).message); setRunning(false);
-    }
-  }
-
-  function handleEvent(evt: RunEvent) {
-    if (evt.type === 'snapshot') {
-      const snapshot = evt.payload as Run;
-      setRun(snapshot);
-      if (snapshot.status === 'succeeded' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
-        setRunning(false);
-        setHistoryTick((t) => t + 1);
-      }
-      return;
-    }
-    if (evt.type === 'runStarted') { setRun(evt.payload as Run); return; }
-    if (evt.type === 'runFinished') {
-      setRun(evt.payload as Run); setRunning(false);
-      unsubRef.current?.(); unsubRef.current = null;
-      setHistoryTick((t) => t + 1);
-      return;
-    }
-    const result = evt.payload as NodeResult | undefined;
-    if (!result || !evt.nodeId) return;
-    const evtKey = (evt.branchPath ?? []).join('/');
-    setRun((prev) => {
-      if (!prev) return prev;
-      // Upsert by (nodeId, branchKey). Newly forked branches just append.
-      const others = prev.nodeResults.filter(
-        (r) => !(r.nodeId === evt.nodeId && branchKey(r) === evtKey)
-      );
-      return {
-        ...prev,
-        nodeResults: [...others, result],
-        status: evt.type === 'nodePaused' ? 'paused' : prev.status,
-        pausedAtNodeId: evt.type === 'nodePaused' ? evt.nodeId
-          : (evt.type === 'nodeResumed' ? undefined : prev.pausedAtNodeId),
-      };
-    });
-  }
-
-  async function onResolveBreakpoint(action: 'resume' | 'skip' | 'abort') {
-    if (!run?.pausedAtNodeId) return;
-    try {
-      const r = await fetch(
-        `/apicover/api/runs/${encodeURIComponent(run.id)}/breakpoints/${encodeURIComponent(run.pausedAtNodeId)}/resolve`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }
-      );
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  }
-
-  const onPaneContextMenu = useCallback(
-    (e: React.MouseEvent | MouseEvent) => {
-      e.preventDefault();
-      if ('ctrlKey' in e && (e as MouseEvent).ctrlKey) return;
-      const me = e as MouseEvent;
-      setMenu({
-        x: me.clientX, y: me.clientY,
-        items: [
-          { label: 'Canvas', header: true },
-          { label: running ? '● running…' : '▶ Run', onClick: onStart, disabled: running || saving },
-          { label: '⌘ Auto-layout', onClick: onAutoLayout },
-          { separator: true },
-          {
-            label: '⊞ New empty group here',
-            onClick: () => {
-              const pos = screenToFlowPosition({ x: me.clientX, y: me.clientY });
-              createEmptyGroupAt(pos.x, pos.y);
-            },
-          },
-          { separator: true },
-          { label: '↻ Refresh status', onClick: () => run && getRun(run.id).then(setRun).catch(() => {}), disabled: !run },
-          { label: '✕ Clear run state', onClick: () => { setRun(null); setErr(null); } },
-        ],
-      });
+  const contextMenus = useCanvasContextMenus(
+    {
+      running,
+      saving,
+      run,
+      breakpoints,
+      startNodeIds,
+      groups,
+      caseSets,
+      selectedIds,
+      endpointLookup,
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [running, dirty, saving, run, screenToFlowPosition]
-  );
-
-  const onNodeContextMenu = useCallback(
-    (e: React.MouseEvent, node: RFNode) => {
-      e.preventDefault();
-      if (e.ctrlKey) return;
-      // Group area right-click → group menu, not the api-node menu.
-      if (isGroupRfNode(node)) {
-        const gid = groupIdFromRf(node.id);
-        const grp = groups.find((g) => g.id === gid);
-        if (grp) {
-          setMenu({
-            x: e.clientX, y: e.clientY,
-            items: [
-              { label: `Group: ${grp.label ?? grp.id}`, header: true },
-              { label: '⚙ Settings…', onClick: () => setEditingGroupId(grp.id) },
-              { separator: true },
-              { label: '🗑 Delete group', danger: true, onClick: () => deleteGroup(grp.id) },
-            ],
-          });
-        }
-        return;
-      }
-      // Branch clones share menu actions with their underlying node — breakpoint, start
-      // marker, etc. all key off the canonical node id, not the synthetic clone id.
-      const cloned = parseBranchCloneRf(node.id);
-      const canonicalId = cloned ? cloned.nodeId : node.id;
-      const data = node.data as ApiNodeData;
-      const result = cloned
-        ? getNodeResult(run, canonicalId, cloned.branchKey)
-        : aggregateNodeResult(run, canonicalId);
-      const isPaused = result?.status === 'paused';
-      const hasBp = breakpoints.some((b) => b.nodeId === canonicalId);
-      const isStart = startNodeIds.includes(canonicalId);
-      const myGroup = groups.find((g) => g.nodeIds.includes(canonicalId));
-      const myCaseSet = caseSets.find((c) => c.anchorNodeId === canonicalId);
-      const itemsForCases: MenuItem[] = [
-        { separator: true },
-        myCaseSet
-          ? { label: '⑂ Edit cases…', onClick: () => setSelectedNodeId(node.id) }
-          : {
-              label: '⑂ Add case set',
-              onClick: () => {
-                const fresh: CaseSet = {
-                  id: `cs-${node.id}-${Date.now().toString(36)}`,
-                  anchorNodeId: node.id,
-                  variants: [
-                    { id: 'v1', label: 'variant 1', overrides: [] },
-                    { id: 'v2', label: 'variant 2', overrides: [] },
-                  ],
-                };
-                setCaseSets((cur) => [...cur.filter((c) => c.anchorNodeId !== node.id), fresh]);
-                setDirty(true);
-                setSelectedNodeId(node.id);
-              },
-            },
-        {
-          label: '⑂ Remove cases',
-          danger: true,
-          disabled: !myCaseSet,
-          onClick: () => {
-            if (!myCaseSet) return;
-            setCaseSets((cur) => cur.filter((c) => c.anchorNodeId !== node.id));
-            setDirty(true);
-          },
-        },
-      ];
-      const itemsForGroupAware: MenuItem[] = myGroup
-        ? [
-            { separator: true },
-            { label: `Group: ${myGroup.label ?? myGroup.id}`, header: true },
-            { label: '⚙ Group settings…', onClick: () => setEditingGroupId(myGroup.id) },
-            { label: '✕ Remove from group', onClick: () => {
-              const nextNodes = myGroup.nodeIds.filter((x) => x !== node.id);
-              if (nextNodes.length === 0) deleteGroup(myGroup.id);
-              else updateGroup({ ...myGroup, nodeIds: nextNodes, mutations: myGroup.mutations?.filter((m) => m.nodeId !== node.id) });
-            }},
-          ]
-        : (selectedIds.length > 1 && selectedIds.includes(node.id))
-          ? [
-              { separator: true },
-              { label: `${selectedIds.length} nodes selected`, header: true },
-              { label: '⊞ Create group from selection', onClick: createGroupFromSelection },
-            ]
-          : [];
-
-      const epForNode = endpointLookup.get(`${data.method.toUpperCase()} ${normalisePath(data.path)}`);
-      setMenu({
-        x: e.clientX, y: e.clientY,
-        items: [
-          { label: `Node: ${node.id}`, header: true },
-          { label: `${data.method} ${data.path}`, header: true },
-          { separator: true },
-          { label: '⚡ Quick Call', onClick: () => epForNode && setQuickCallEp(epForNode), disabled: !epForNode },
-          { label: '✏ Edit (open inspector)', onClick: () => setSelectedNodeId(canonicalId) },
-          { label: hasBp ? '● Remove breakpoint' : '○ Add breakpoint', onClick: () => toggleBreakpoint(canonicalId) },
-          { label: isStart ? '○ Unset start node' : '◉ Set as start node', onClick: () => toggleStartNode(canonicalId) },
-          ...itemsForGroupAware,
-          ...itemsForCases,
-          { separator: true },
-          { label: 'Resume', onClick: () => onResolveBreakpoint('resume'), disabled: !isPaused },
-          { label: 'Skip',   onClick: () => onResolveBreakpoint('skip'),   disabled: !isPaused },
-          { label: 'Abort run', onClick: () => onResolveBreakpoint('abort'), danger: true, disabled: !isPaused },
-          { separator: true },
-          {
-            label: 'Copy response JSON',
-            disabled: !result?.response?.body,
-            onClick: () => result?.response?.body !== undefined &&
-              navigator.clipboard.writeText(JSON.stringify(result.response.body, null, 2)).catch(() => {}),
-          },
-          { label: 'Copy node id', onClick: () => navigator.clipboard.writeText(node.id).catch(() => {}) },
-          { separator: true },
-          { label: '🗑 Delete node', danger: true, onClick: () => deleteNode(canonicalId) },
-        ],
-      });
+    {
+      onStart,
+      onAutoLayout,
+      createEmptyGroupAt,
+      setEditingGroupId,
+      deleteGroup,
+      toggleBreakpoint,
+      toggleStartNode,
+      deleteNode,
+      createGroupFromSelection,
+      updateGroup,
+      setSelectedNodeId,
+      setQuickCallEp,
+      setCaseSets,
+      setDirty,
+      setRun,
+      setErr,
+      onResolveBreakpoint,
+      deleteEdge,
+      screenToFlowPosition,
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [run, breakpoints, startNodeIds, groups, selectedIds]
-  );
-
-  const onEdgeContextMenu = useCallback(
-    (e: React.MouseEvent, edge: RFEdge) => {
-      e.preventDefault();
-      if (e.ctrlKey) return;
-      setMenu({
-        x: e.clientX, y: e.clientY,
-        items: [
-          { label: `Edge: ${edge.source} → ${edge.target}`, header: true },
-          { label: '🗑 Delete edge', danger: true, onClick: () => deleteEdge(edge.id) },
-        ],
-      });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
   );
 
   return (
@@ -1382,9 +770,9 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
               const gnode = sel.find(isGroupRfNode);
               setSelectedGroupId(gnode ? groupIdFromRf(gnode.id) : null);
             }}
-            onPaneContextMenu={onPaneContextMenu}
-            onNodeContextMenu={onNodeContextMenu}
-            onEdgeContextMenu={onEdgeContextMenu}
+            onPaneContextMenu={contextMenus.paneHandler}
+            onNodeContextMenu={contextMenus.nodeHandler}
+            onEdgeContextMenu={contextMenus.edgeHandler}
             fitView
             proOptions={{ hideAttribution: true }}
             deleteKeyCode={['Backspace', 'Delete']}
@@ -1393,7 +781,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
             <Background />
             <Controls showInteractive={false} />
           </ReactFlow>
-          {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+          {contextMenus.menuElement}
         </div>
         <InspectorPanel
           selectedApiNode={selectedApiNode}
