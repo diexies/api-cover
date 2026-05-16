@@ -7353,3 +7353,303 @@ code {
 .service-callers-kind.kind-externalhttp { color: #c87a7a; border-color: #4a2b2b; }
 .service-callers-kind.kind-database { color: #6fb87a; border-color: #2b4a2f; }
 .service-callers-kind.kind-cycle { color: #b87ac4; border-color: #4a2b4a; }
+
+/* Error boundary fallback — surfaced when a top-level region crashes. */
+.error-boundary-card {
+  margin: var(--sp-6);
+  padding: var(--sp-7) var(--sp-8);
+  border: 1px solid var(--st-fail-border);
+  border-radius: var(--r-lg);
+  background: var(--st-fail-bg);
+  color: var(--fg-1);
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.eb-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.eb-icon {
+  font-size: 1.4rem;
+  color: var(--st-fail-fg);
+  line-height: 1;
+}
+.eb-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: var(--fw-bold);
+  color: var(--st-fail-fg);
+}
+.eb-message {
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.eb-actions {
+  display: flex;
+  gap: var(--sp-4);
+}
+.eb-btn {
+  appearance: none;
+  border: 1px solid var(--st-fail-border);
+  background: transparent;
+  color: var(--fg-1);
+  font-size: 0.85rem;
+  font-weight: var(--fw-med);
+  padding: var(--sp-4) var(--sp-6);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard);
+}
+.eb-btn:hover {
+  background: color-mix(in srgb, var(--st-fail-fg) 12%, transparent);
+}
+.eb-btn.primary {
+  background: var(--st-fail-fg);
+  color: #fff;
+  border-color: var(--st-fail-fg);
+}
+.eb-btn.primary:hover {
+  filter: brightness(1.05);
+}
+
+/* Radix Dialog wrapper styles. Content is portalled to <body>; positions itself centred
+   with sizes driven by .modal-size-* modifiers. */
+.modal-card {
+  position: fixed; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+  display: flex; flex-direction: column;
+  max-height: 88vh;
+  z-index: 1000;
+  animation: pop-in var(--dur-fast) var(--ease-out);
+  overflow: hidden;
+}
+.modal-card[data-state="closed"] {
+  animation: pop-out var(--dur-fast) var(--ease-standard);
+}
+.modal-size-sm { width: min(420px, calc(100vw - 2rem)); }
+.modal-size-md { width: min(560px, calc(100vw - 2rem)); }
+.modal-size-lg { width: min(720px, calc(100vw - 2rem)); }
+.modal-size-full { width: calc(100vw - 2rem); height: calc(100vh - 2rem); max-height: none; }
+
+.modal-card .modal-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-7);
+  border-bottom: 1px solid var(--hairline);
+}
+.modal-card .modal-title {
+  margin: 0; font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--fg-1);
+}
+.modal-card .modal-desc {
+  margin: 0; font-size: var(--fs-xs); color: var(--fg-3);
+}
+.modal-card .modal-body {
+  padding: var(--sp-6) var(--sp-7);
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+.modal-card .modal-foot {
+  display: flex; justify-content: flex-end; gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-7);
+  border-top: 1px solid var(--hairline);
+  background: var(--surface-2, transparent);
+}
+.modal-card .modal-close {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 1rem;
+  width: 28px; height: 28px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.modal-card .modal-close:hover { background: var(--surface-2); color: var(--fg-1); }
+.modal-card .modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.modal-backdrop[data-state="open"] {
+  animation: fade-in var(--dur-fast) var(--ease-standard);
+}
+.modal-backdrop[data-state="closed"] {
+  animation: fade-out var(--dur-fast) var(--ease-standard);
+}
+
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes pop-out { from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                    to   { opacity: 0; transform: translate(-50%, -48%) scale(0.96); } }
+
+/* GlobalSettingsModal — re-use the existing .global-settings overrides on the new
+   Radix-backed .modal-card. Keeps wider sizing and zero-padding internal layout. */
+.modal-card.global-settings {
+  width: min(720px, calc(100vw - 2rem));
+  max-height: 88vh;
+  padding: 0;
+}
+.modal-card.global-settings .modal-head { padding: 0; border-bottom: 0; }
+.modal-card.global-settings .modal-body { padding: 0; }
+
+/* CreateCustomToolModal — header has its own button row; modal-body legacy class lives
+   under Radix Content now. */
+.modal-card.agent-mcp-modal .modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.agent-mcp-modal-header-actions { display: flex; gap: var(--sp-4); align-items: center; }
+
+/* JSONLogic hint popover — surfaced next to JSONLogic editors. */
+.jl-hint-trigger {
+  appearance: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 0.8rem;
+  cursor: help;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.jl-hint-trigger:hover { background: var(--surface-2); color: var(--fg-1); }
+.jl-hint-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.jl-hint-popover {
+  width: min(420px, calc(100vw - 2rem));
+  max-height: min(480px, calc(100vh - 4rem));
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-modal);
+  display: flex; flex-direction: column;
+  z-index: 1100;
+  overflow: hidden;
+}
+.jl-hint-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--hairline);
+}
+.jl-hint-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-med);
+  padding: var(--sp-4) var(--sp-6);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+.jl-hint-tab:hover { color: var(--fg-1); }
+.jl-hint-tab.is-active { color: var(--fg-1); border-bottom-color: var(--accent, #4b8bbe); }
+.jl-hint-body {
+  padding: var(--sp-5) var(--sp-6);
+  overflow-y: auto;
+}
+.jl-hint-list, .jl-hint-examples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.jl-hint-list li {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: var(--sp-4);
+  row-gap: var(--sp-2);
+  align-items: center;
+}
+.jl-hint-path {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--fg-1);
+  word-break: break-all;
+}
+.jl-hint-args, .jl-hint-type {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--fg-3);
+  justify-self: end;
+}
+.jl-hint-doc {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--fg-2);
+  line-height: 1.45;
+}
+.jl-hint-examples li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.jl-hint-example-op {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--fg-3);
+}
+.jl-hint-snippet {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm, 4px);
+  padding: var(--sp-3) var(--sp-4);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+.jl-hint-snippet:hover { background: color-mix(in srgb, var(--accent, #4b8bbe) 6%, var(--surface-2)); }
+.jl-hint-snippet code { background: transparent; padding: 0; }
+.jl-hint-copy { color: var(--fg-3); }
+.jl-hint-arrow { fill: var(--bg); }
+
+.term-form-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* SSE reconnect banner — surfaced inside the canvas while a live run's event stream is
+   recovering from a connection loss. Hidden once the connection is healthy again. */
+.sse-reconnect-banner {
+  background: var(--st-warn-bg, color-mix(in srgb, #f59e0b 12%, transparent));
+  color: var(--st-warn-fg, #d97706);
+  border: 1px solid var(--st-warn-border, rgba(245, 158, 11, 0.4));
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-5);
+  margin: var(--sp-3) var(--sp-6);
+  font-size: 0.82rem;
+  font-weight: var(--fw-med);
+  display: flex; align-items: center; gap: var(--sp-3);
+}
+.sse-reconnect-banner::before {
+  content: '↻';
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+}
+@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }

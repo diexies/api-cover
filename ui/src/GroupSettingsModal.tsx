@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ExecutionGroup, NodeMutation } from './api';
+import { Modal } from './components/Modal';
+import { JsonLogicHint } from './components/JsonLogicHint';
 
 // Preset rules surfaced as chips beneath each mutation editor. These cover the common
 // "replace by index", "1-based step", "string suffix per iteration", and "increment a
@@ -34,12 +36,6 @@ export function GroupSettingsModal({ initial, groupNodeIds, onSave, onDelete, on
   const [delay, setDelay] = useState(initial.repeat?.delay ?? '');
   const [mutations, setMutations] = useState<NodeMutation[]>(initial.mutations ?? []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   function addMutation() {
     setMutations([
       ...mutations,
@@ -65,13 +61,17 @@ export function GroupSettingsModal({ initial, groupNodeIds, onSave, onDelete, on
   }
 
   return (
-    <>
-      <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Group settings">
-        <div className="modal-head">
-          <h3>Group settings</h3>
-          <button className="close-btn" onClick={onClose}>×</button>
-        </div>
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      size="md"
+      labelledBy="group-settings-title"
+    >
+      <Modal.Header>
+        <Modal.Title id="group-settings-title">Group settings</Modal.Title>
+        <Modal.Close />
+      </Modal.Header>
+      <Modal.Body>
         <div className="muted small">
           {groupNodeIds.length} node{groupNodeIds.length === 1 ? '' : 's'} in this group: {groupNodeIds.join(', ')}
         </div>
@@ -118,6 +118,7 @@ export function GroupSettingsModal({ initial, groupNodeIds, onSave, onDelete, on
         <div className="mutations">
           <div className="mutations-head">
             <span className="muted small">mutations (per-iteration field overrides)</span>
+            <JsonLogicHint ctx="group" triggerLabel="Group mutation rules accept iteration / total / previous" />
             <button className="kv-add" onClick={addMutation}>+ add</button>
           </div>
           {mutations.length === 0 && <div className="muted small">no mutations</div>}
@@ -169,12 +170,12 @@ export function GroupSettingsModal({ initial, groupNodeIds, onSave, onDelete, on
           </div>
         </div>
 
-        <div className="modal-actions">
-          <button className="btn danger-btn" onClick={() => { onDelete(); onClose(); }}>🗑 Delete group</button>
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={commit}>Save</button>
-        </div>
-      </div>
-    </>
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn danger-btn" onClick={() => { onDelete(); onClose(); }}>🗑 Delete group</button>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn primary" onClick={commit}>Save</button>
+      </Modal.Footer>
+    </Modal>
   );
 }

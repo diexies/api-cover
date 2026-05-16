@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
 import { ServiceCallersList } from './ServiceCallersList';
+import { Modal } from '../components/Modal';
 
 interface Props {
   serviceId: string;
@@ -15,42 +15,33 @@ interface Props {
  * the tree and pin the node via requestedFocus.
  */
 export function MetricsCallersModal({ serviceId, shortName, onFocus, onClose }: Props) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <>
-      <div className="metrics-callers-backdrop" onClick={onClose} />
-      <aside className="metrics-callers-modal" role="dialog" aria-modal="true" aria-label={`Callers of ${shortName}`}>
-        <header className="metrics-callers-head">
-          <div className="metrics-callers-title">
-            <strong>{shortName}</strong>
-            <span className="muted small">{serviceId}</span>
-          </div>
-          <div className="metrics-callers-actions">
-            {onFocus && (
-              <button
-                type="button"
-                className="metrics-callers-focus-btn"
-                onClick={() => { onFocus(serviceId); onClose(); }}
-                title="Focus this node in the system map tree view"
-              >Focus in map</button>
-            )}
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      size="lg"
+      labelledBy="metrics-callers-title"
+    >
+      <Modal.Header>
+        <div className="metrics-callers-title">
+          <Modal.Title id="metrics-callers-title">{shortName}</Modal.Title>
+          <span className="muted small">{serviceId}</span>
+        </div>
+        <div className="metrics-callers-actions">
+          {onFocus && (
             <button
               type="button"
-              className="metrics-callers-close"
-              onClick={onClose}
-              aria-label="close"
-            >×</button>
-          </div>
-        </header>
-        <div className="metrics-callers-body">
-          <ServiceCallersList serviceId={serviceId} />
+              className="metrics-callers-focus-btn"
+              onClick={() => { onFocus(serviceId); onClose(); }}
+              title="Focus this node in the system map tree view"
+            >Focus in map</button>
+          )}
+          <Modal.Close />
         </div>
-      </aside>
-    </>
+      </Modal.Header>
+      <Modal.Body>
+        <ServiceCallersList serviceId={serviceId} />
+      </Modal.Body>
+    </Modal>
   );
 }

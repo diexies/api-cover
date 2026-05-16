@@ -5,8 +5,7 @@ import { ChatComposer } from './home/ChatComposer';
 import { CapabilityChips } from './home/CapabilityChips';
 import { GitTimeline } from './home/GitTimeline';
 import { coverage } from './home/utils';
-
-const CHAT_DRAFT_KEY = 'apicover.chatDraft';
+import { usePrefs } from './stores/prefs';
 
 type Section = 'home' | 'stats' | 'scenarios';
 
@@ -100,8 +99,6 @@ function HomeSection({
   const [mode, setMode] = useState<string | null>(null);
 
   // Persist composer draft so a refresh doesn't lose the half-typed thought.
-  // Wrap in try/catch because Safari Private Mode + some embedded contexts
-  // throw on localStorage writes once they hit quota.
   function handleDraftChange(v: string) {
     // If user typed `/word ` at the start and there's no mode yet, lift the
     // command into the chip so the textarea only shows the prompt body.
@@ -113,18 +110,18 @@ function HomeSection({
           setMode(word);
           const rest = v.slice(m[0].length);
           setDraft(rest);
-          try { localStorage.setItem(CHAT_DRAFT_KEY, rest); } catch { /* quota */ }
+          usePrefs.getState().set('chatDraft', rest);
           return;
         }
       }
     }
     setDraft(v);
-    try { localStorage.setItem(CHAT_DRAFT_KEY, v); } catch { /* quota / disabled */ }
+    usePrefs.getState().set('chatDraft', v);
   }
   function handleSubmit(text: string) {
     const t = text.trim();
     if (!t) return;
-    try { localStorage.removeItem(CHAT_DRAFT_KEY); } catch { /* same as above */ }
+    usePrefs.getState().set('chatDraft', '');
     setDraft('');
     const sent = mode;
     setMode(null);
@@ -242,7 +239,7 @@ function HomeSection({
 }
 
 function readDraft(): string {
-  try { return localStorage.getItem(CHAT_DRAFT_KEY) ?? ''; } catch { return ''; }
+  return usePrefs.getState().chatDraft;
 }
 
 /**

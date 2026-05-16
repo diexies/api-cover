@@ -757,13 +757,26 @@ export interface RunEvent {
  * The server emits a synthetic "snapshot" event first carrying the current Run object so
  * late subscribers don't miss state.
  */
+import { openReconnectingEventSource, type SseStatus as SseStatusType } from './hooks/useEventSource';
+
+export type SseStatus = SseStatusType;
+
+export interface SubscribeRunEventsOptions {
+  onStatus?: (status: SseStatus) => void;
+  onError?: (e: Event) => void;
+}
+
 export function subscribeRunEvents(
   runId: string,
   onEvent: (evt: RunEvent) => void,
-  onError?: (e: Event) => void
+  optsOrError?: SubscribeRunEventsOptions | ((e: Event) => void),
 ): () => void {
+  // Accept both the legacy onError-fn shape and the new options object so existing callers
+  // (ScenarioCanvas) keep working without a same-PR caller refactor.
+  const opts: SubscribeRunEventsOptions = typeof optsOrError === 'function'
+    ? { onError: optsOrError }
+    : (optsOrError ?? {});
   const url = `${apiBase}/runs/${encodeURIComponent(runId)}/events`;
-  const es = new EventSource(url);
   const eventNames: RunEvent['type'][] = [
     'snapshot',
     'runStarted',
@@ -776,8 +789,11 @@ export function subscribeRunEvents(
     'branchSpawned',
     'branchCompleted',
   ];
-  for (const name of eventNames) {
-    es.addEventListener(name, (e: MessageEvent) => {
+  const handle = openReconnectingEventSource(url, {
+    events: eventNames,
+    onStatus: opts.onStatus,
+    onError: opts.onError,
+    onEvent: (name, e) => {
       try {
         const data = JSON.parse(e.data);
         if (name === 'snapshot') {
@@ -788,10 +804,9 @@ export function subscribeRunEvents(
       } catch (err) {
         console.error(`Failed to parse SSE ${name}:`, err);
       }
-    });
-  }
-  if (onError) es.onerror = onError;
-  return () => es.close();
+    },
+  });
+  return () => handle.close();
 }
 
 // ---------------------------------------------------------------------------

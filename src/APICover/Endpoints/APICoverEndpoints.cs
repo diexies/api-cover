@@ -402,8 +402,24 @@ internal static class APICoverEndpoints
 
             try
             {
-                await foreach (var evt in bus.SubscribeAsync(id, ctx.RequestAborted))
+                // Race the bus subscription against a 15s heartbeat ticker so the connection
+                // doesn't go quiet for long enough that intermediaries (proxies, load balancers)
+                // drop it as idle. Heartbeats are SSE comment lines (`:keepalive`) per spec —
+                // the browser EventSource ignores them but the bytes keep the channel alive.
+                var ct = ctx.RequestAborted;
+                await using var enumerator = bus.SubscribeAsync(id, ct).GetAsyncEnumerator(ct);
+                var nextTask = enumerator.MoveNextAsync().AsTask();
+                while (!ct.IsCancellationRequested)
                 {
+                    var heartbeatTask = Task.Delay(TimeSpan.FromSeconds(15), ct);
+                    var winner = await Task.WhenAny(nextTask, heartbeatTask);
+                    if (winner == heartbeatTask)
+                    {
+                        await WriteHeartbeat(ctx);
+                        continue;
+                    }
+                    if (!nextTask.Result) break;
+                    var evt = enumerator.Current;
                     var name = evt.Type switch
                     {
                         RunEventType.RunStarted => "runStarted",
@@ -418,6 +434,7 @@ internal static class APICoverEndpoints
                     var payload = JsonSerializer.Serialize(evt, Json);
                     await WriteEvent(ctx, name, payload);
                     if (evt.Type == RunEventType.RunFinished) break;
+                    nextTask = enumerator.MoveNextAsync().AsTask();
                 }
             }
             catch (OperationCanceledException)
@@ -435,6 +452,14 @@ internal static class APICoverEndpoints
                 await ctx.Response.WriteAsync($"data: {line}\n");
             }
             await ctx.Response.WriteAsync("\n");
+            await ctx.Response.Body.FlushAsync();
+        }
+
+        static async Task WriteHeartbeat(HttpContext ctx)
+        {
+            // SSE comment line — recognised by spec, ignored by EventSource, keeps the
+            // connection alive across idle proxies.
+            await ctx.Response.WriteAsync(":heartbeat\n\n");
             await ctx.Response.Body.FlushAsync();
         }
 

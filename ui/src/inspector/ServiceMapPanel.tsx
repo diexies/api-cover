@@ -3,6 +3,7 @@ import { type ServiceMap, type ServiceMapEdge, type ServiceMapNode, type Service
 import { MetricsTable } from './MetricsTable';
 import { SystemMapView } from './SystemMapView';
 import { LayeredDrillDown } from './LayeredDrillDown';
+import { usePrefs } from '../stores/prefs';
 
 interface Props {
   onClose?: () => void;
@@ -11,9 +12,9 @@ interface Props {
 type View = 'map' | 'metrics';
 type MapMode = 'tree' | 'force';
 type DrillDirection = 'forward' | 'reverse';
-const MAP_MODE_STORAGE = 'apicover.servicemap.mode';
-const DRILL_DIRECTION_STORAGE = 'apicover.servicemap.direction';
-const SIDE_RAIL_STORAGE = 'apicover.side.sections';
+// Recent ids are kept in localStorage for cross-tab `storage` event dispatch — moving them
+// into the prefs store would break that channel. Service-map preferences (mode, direction,
+// side rail) live in the prefs store.
 const RECENT_STORAGE = 'apicover.recent.endpoints';
 type SideSectionKey = 'recent' | 'hotspots' | 'isolated';
 const DEFAULT_OPEN: Record<SideSectionKey, boolean> = { recent: true, hotspots: true, isolated: true };
@@ -49,15 +50,9 @@ export function ServiceMapPanel({ onClose }: Props) {
   const [loading, setLoading] = useState(true);
 
   const [view, setView] = useState<View>('map');
-  const [mapMode, setMapModeState] = useState<MapMode>(() => {
-    if (typeof window === 'undefined') return 'tree';
-    const stored = window.localStorage?.getItem(MAP_MODE_STORAGE);
-    return stored === 'force' ? 'force' : 'tree';
-  });
-  const setMapMode = (m: MapMode) => {
-    setMapModeState(m);
-    try { window.localStorage?.setItem(MAP_MODE_STORAGE, m); } catch { /* storage off */ }
-  };
+  const storedMapMode = usePrefs((s) => s.serviceMap.mode);
+  const mapMode: MapMode = storedMapMode === 'force' ? 'force' : 'tree';
+  const setMapMode = (m: MapMode) => usePrefs.getState().setServiceMap('mode', m);
   const [search, setSearch] = useState('');
   const [visibleKinds, setVisibleKinds] = useState<Set<ServiceMapNodeKind>>(() => new Set(ALL_KINDS));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -67,14 +62,10 @@ export function ServiceMapPanel({ onClose }: Props) {
   // Drill direction: forward (endpoint → services) is the long-established default; reverse
   // (service → callers) is the new mode. Persisted so the user keeps whichever lens they
   // were last working with.
-  const [direction, setDirectionState] = useState<DrillDirection>(() => {
-    if (typeof window === 'undefined') return 'forward';
-    const stored = window.localStorage?.getItem(DRILL_DIRECTION_STORAGE);
-    return stored === 'reverse' ? 'reverse' : 'forward';
-  });
+  const storedDirection = usePrefs((s) => s.serviceMap.drillDirection);
+  const direction: DrillDirection = storedDirection === 'reverse' ? 'reverse' : 'forward';
   const setDirection = (d: DrillDirection) => {
-    setDirectionState(d);
-    try { window.localStorage?.setItem(DRILL_DIRECTION_STORAGE, d); } catch { /* storage off */ }
+    usePrefs.getState().setServiceMap('drillDirection', d);
     // Clear focus state — node ids and pickers are not interchangeable between modes.
     setSelectedId(null);
     setRequestedFocus(null);
@@ -84,20 +75,11 @@ export function ServiceMapPanel({ onClose }: Props) {
     setView('map');
     setRequestedFocus((prev) => ({ id, bump: (prev?.bump ?? 0) + 1 }));
   };
-  const [sideOpen, setSideOpenState] = useState<Record<SideSectionKey, boolean>>(() => {
-    if (typeof window === 'undefined') return DEFAULT_OPEN;
-    try {
-      const raw = window.localStorage?.getItem(SIDE_RAIL_STORAGE);
-      if (raw) return { ...DEFAULT_OPEN, ...JSON.parse(raw) };
-    } catch { /* ignore */ }
-    return DEFAULT_OPEN;
-  });
+  const storedSideRail = usePrefs((s) => s.serviceMap.sideRail);
+  const sideOpen: Record<SideSectionKey, boolean> = { ...DEFAULT_OPEN, ...storedSideRail };
   const toggleSection = (key: SideSectionKey) => {
-    setSideOpenState((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      try { window.localStorage?.setItem(SIDE_RAIL_STORAGE, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
+    const next = { ...sideOpen, [key]: !sideOpen[key] };
+    usePrefs.getState().setServiceMap('sideRail', next);
   };
   const [recentIds, setRecentIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];

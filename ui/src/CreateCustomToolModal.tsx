@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { type CustomToolDefinition, createCustomTool } from './api';
+import { Modal } from './components/Modal';
 
 type ParamRow = {
   name: string;
@@ -116,18 +117,26 @@ export function CreateCustomToolModal({
   }
 
   return (
-    <div className="agent-mcp-modal-backdrop" onClick={onClose}>
-      <div className="agent-mcp-modal" onClick={(e) => e.stopPropagation()}>
-        <header className="agent-mcp-modal-head">
-          <button type="button" className="agent-memory-iconbtn" onClick={onClose} aria-label="close">✕</button>
-          <h3>New custom tool</h3>
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      size="lg"
+      labelledBy="create-custom-tool-title"
+      className="agent-mcp-modal"
+    >
+      <Modal.Header>
+        <Modal.Title id="create-custom-tool-title">New custom tool</Modal.Title>
+        <div className="agent-mcp-modal-header-actions">
           <button
             type="button"
             className="agent-mcp-modal-save"
             disabled={submitting || validate().length > 0}
             onClick={(e) => handleSubmit(e as unknown as React.FormEvent)}
           >{submitting ? 'Saving…' : 'Save'}</button>
-        </header>
+          <Modal.Close />
+        </div>
+      </Modal.Header>
+      <Modal.Body>
         <form onSubmit={handleSubmit} className="agent-mcp-modal-body">
           {errors.length > 0 && (
             <div className="agent-mcp-modal-errors">
@@ -249,7 +258,7 @@ export function CreateCustomToolModal({
           </label>
 
         </form>
-      </div>
-    </div>
+      </Modal.Body>
+    </Modal>
   );
 }

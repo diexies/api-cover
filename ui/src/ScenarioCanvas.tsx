@@ -13,18 +13,18 @@ import {
   type Node as RFNode,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ApiNodeView, type ApiNodeData } from './ApiNodeView';
-import { GroupAreaNode, type GroupAreaData } from './GroupAreaNode';
-import { CaseAreaNode, type CaseAreaData } from './CaseAreaNode';
+import { type ApiNodeData } from './ApiNodeView';
+import { computeMembership, type Rect as MembershipRect } from './canvas/computeMembership';
+import { type GroupAreaData } from './GroupAreaNode';
+import { type CaseAreaData } from './CaseAreaNode';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { ENDPOINT_DRAG_MIME } from './EndpointPalette';
-import { NodeInspector } from './NodeInspector';
+import { InspectorPanel } from './inspector/InspectorPanel';
 import { authToRunOptions, type AuthConfig } from './auth';
 import { GroupSettingsModal } from './GroupSettingsModal';
 import { autoLayout } from './layout';
 import { wouldCreateCycle } from './dag';
 import { normalisePath } from './App';
-import { useResizableWidth } from './useResizableWidth';
 import { useVisibilityTicker } from './hooks/useVisibilityTicker';
 import { FlowHeader } from './FlowHeader';
 import { RunHistoryPanel } from './RunHistoryPanel';
@@ -49,19 +49,33 @@ import {
   type RunEvent,
   type Scenario,
 } from './api';
-
-const nodeTypes = { api: ApiNodeView, groupArea: GroupAreaNode, caseArea: CaseAreaNode };
-
-const GROUP_PALETTE = ['#a855f7', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6', '#6366f1'];
-
-const NEW_NODE_W = 220;
-const NEW_NODE_H = 80;
-
-function colorForGroup(id: string): string {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return GROUP_PALETTE[Math.abs(h) % GROUP_PALETTE.length];
-}
+import {
+  BRANCH_LANE_SPREAD,
+  NEW_NODE_H,
+  NEW_NODE_W,
+  aggregateBranchStatus,
+  branchCloneEdgeId,
+  branchCloneRfId,
+  buildFromScenario,
+  caseIdFromRf,
+  caseRfId,
+  collectDescendants,
+  colorForGroup,
+  formatAgo,
+  groupHashClass,
+  groupIdFromRf,
+  groupRfId,
+  isApiRf,
+  isBranchCloneEdge,
+  isBranchCloneRf,
+  isCaseRfNode,
+  isGroupRfNode,
+  isStructuralRf,
+  nextNodeId,
+  nodeTypes,
+  parseBranchCloneRf,
+  seedFromEndpoint,
+} from './canvas/scenarioCanvasUtils';
 
 type EndpointStatBucket = {
   passed: number;
@@ -99,9 +113,14 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const nowTick = useVisibilityTicker(lastSavedAt != null);
   const unsubRef = useRef<(() => void) | null>(null);
+  const [sseStatus, setSseStatus] = useState<import('./api').SseStatus | null>(null);
   const onSaveRef = useRef<() => Promise<void>>(async () => {});
   const dirtyRef = useRef(false);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  // Snapshot of API node bounds and group bounds from the prior membership pass — lets the
+  // memoised recompute below skip groups whose neighbourhood didn't move.
+  const prevApiPositionsRef = useRef<Map<string, MembershipRect>>(new Map());
+  const prevGroupBoundsRef = useRef<Map<string, MembershipRect>>(new Map());
 
   // Authoritative scenario state (full ApiNode data) — RF state is just the visual mirror.
   const [apiNodes, setApiNodes] = useState<ApiNode[]>(scenario.nodes);
@@ -194,54 +213,39 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   }, [dirty, saving]);
 
   // Live geometric membership: recompute every group's nodeIds from current positions vs
-  // current bounds. Node moved out of a rectangle → no longer a member. Node moved in → now
-  // a member. Runs whenever positions or group bounds change. Drops groups whose RF area
-  // node was deleted from the canvas.
+  // current bounds. Memoised via prev-position snapshot — when no API node moved and no
+  // group bounds changed, the helper returns the same groups reference and React bails.
   useEffect(() => {
-    const apiRf = nodes.filter(isApiRf);
-    const groupRf = nodes.filter(isGroupRfNode);
-
+    const apiNodes = nodes.filter(isApiRf).map((n) => ({
+      id: n.id,
+      x: n.position.x,
+      y: n.position.y,
+      w: n.measured?.width ?? NEW_NODE_W,
+      h: n.measured?.height ?? NEW_NODE_H,
+    }));
+    const groupSamples = nodes.filter(isGroupRfNode).map((rf) => {
+      const id = groupIdFromRf(rf.id);
+      return {
+        id,
+        bounds: {
+          x: rf.position.x,
+          y: rf.position.y,
+          width: (rf.style?.width as number | undefined) ?? rf.measured?.width ?? 200,
+          height: (rf.style?.height as number | undefined) ?? rf.measured?.height ?? 120,
+        },
+      };
+    });
     setGroups((cur) => {
-      let changed = false;
-      const next = cur
-        .filter((g) => groupRf.some((n) => groupIdFromRf(n.id) === g.id) || !g.bounds)
-        .map((g) => {
-          const rf = groupRf.find((n) => groupIdFromRf(n.id) === g.id);
-          if (!rf) return g;
-          const bounds = {
-            x: rf.position.x,
-            y: rf.position.y,
-            width: (rf.style?.width as number | undefined) ?? rf.measured?.width ?? g.bounds?.width ?? 200,
-            height: (rf.style?.height as number | undefined) ?? rf.measured?.height ?? g.bounds?.height ?? 120,
-          };
-          const memberIds = apiRf
-            .filter((n) => {
-              const w = n.measured?.width ?? NEW_NODE_W;
-              const h = n.measured?.height ?? NEW_NODE_H;
-              const cx = n.position.x + w / 2;
-              const cy = n.position.y + h / 2;
-              const inside = cx >= bounds.x && cx <= bounds.x + bounds.width
-                  && cy >= bounds.y && cy <= bounds.y + bounds.height;
-              // eslint-disable-next-line no-console
-              console.debug('[membership]', g.id, 'check', n.id, { cx, cy, bounds, w, h, measured: n.measured, inside });
-              return inside;
-            })
-            .map((n) => n.id);
-
-          const sameBounds = g.bounds
-            && g.bounds.x === bounds.x && g.bounds.y === bounds.y
-            && g.bounds.width === bounds.width && g.bounds.height === bounds.height;
-          // Order-insensitive set equality: RF can reshuffle filter results between renders;
-          // an order-only diff would churn groups state and visually drop the ring for a frame.
-          const prevSet = new Set(g.nodeIds);
-          const sameMembers = g.nodeIds.length === memberIds.length
-            && memberIds.every((id) => prevSet.has(id));
-          if (sameBounds && sameMembers) return g;
-          changed = true;
-          return { ...g, bounds, nodeIds: memberIds };
-        });
-      if (next.length !== cur.length) changed = true;
-      return changed ? next : cur;
+      const out = computeMembership({
+        apiNodes,
+        groupSamples,
+        groups: cur,
+        prevPositions: prevApiPositionsRef.current,
+        prevGroupBounds: prevGroupBoundsRef.current,
+      });
+      prevApiPositionsRef.current = out.nextPositions;
+      prevGroupBoundsRef.current = out.nextGroupBounds;
+      return out.groups;
     });
   }, [nodes]);
 
@@ -658,10 +662,6 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   }, [run, breakpoints, groups, caseSets, startNodeIds, selectedBranchKey]);
 
   const selectedApiNode = apiNodes.find((n) => n.id === selectedNodeId) ?? null;
-  const selectedEndpoint = selectedApiNode
-    ? endpointLookup.get(`${selectedApiNode.method.toUpperCase()} ${normalisePath(selectedApiNode.path)}`)
-    : undefined;
-  const inspectorSize = useResizableWidth('utopia.inspector.width', 480, 320, 900);
 
   function patchApiNode(id: string, patch: Partial<ApiNode>) {
     setApiNodes((cur) => cur.map((n) => (n.id === id ? { ...n, ...patch } : n)));
@@ -1003,8 +1003,9 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       });
       setRun(started);
       unsubRef.current?.();
-      unsubRef.current = subscribeRunEvents(started.id, handleEvent, () => {
-        getRun(started.id).then(setRun).catch(() => {});
+      unsubRef.current = subscribeRunEvents(started.id, handleEvent, {
+        onError: () => { getRun(started.id).then(setRun).catch(() => {}); },
+        onStatus: (s) => setSseStatus(s),
       });
     } catch (e) {
       setErr((e as Error).message); setRunning(false);
@@ -1236,6 +1237,11 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
         onDescriptionChange={(v) => { setFlowDescription(v); setDirty(true); }}
         onTagsChange={(v) => { setFlowTags(v); setDirty(true); }}
       />
+      {running && sseStatus === 'reconnecting' && (
+        <div className="sse-reconnect-banner" role="status" aria-live="polite">
+          Reconnecting to live run stream…
+        </div>
+      )}
       <div className="canvas-toolbar">
         <button className="btn primary" onClick={onStart} disabled={running || saving}>
           {running ? '● running…' : '▶ Run'}
@@ -1389,204 +1395,35 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           </ReactFlow>
           {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
         </div>
-        {selectedApiNode && (
-          <div
-            className="resize-handle vertical inspector-resize"
-            onMouseDown={(e) => inspectorSize.startResize(e, 'left')}
-            title="Drag to resize inspector"
-          />
-        )}
-        {selectedApiNode && (() => {
-          const key = `${selectedApiNode.method.toUpperCase()} ${normalisePath(selectedApiNode.path)}`;
-          const usingScenarios = scenariosUsingEndpoint?.get(key) ?? [];
-          const statBucket = endpointStatsByKey?.get(key);
-          const scenariosUsing = usingScenarios.map((s) => {
-            const per = statBucket?.perScenario.get(s.id);
-            return { id: s.id, name: s.name, passed: per?.passed ?? 0, failed: per?.failed ?? 0 };
-          });
-          const endpointTotals = { passed: statBucket?.passed ?? 0, failed: statBucket?.failed ?? 0 };
-          return (
-            <NodeInspector
-              node={selectedApiNode}
-              width={inspectorSize.width}
-              endpoint={selectedEndpoint}
-              isStartNode={startNodeIds.includes(selectedApiNode.id)}
-              groupsForNode={groups.filter((g) => g.nodeIds.includes(selectedApiNode.id))}
-              iterations={aggregateNodeResult(run, selectedApiNode.id)?.iterations}
-              siblings={apiNodes.filter((n) => n.id !== selectedApiNode.id)}
-              upstreamIds={edges.filter((e) => e.target === selectedApiNode.id).map((e) => e.source)}
-              downstreamIds={edges.filter((e) => e.source === selectedApiNode.id).map((e) => e.target)}
-              scenariosUsing={scenariosUsing}
-              endpointTotals={endpointTotals}
-              scenarioName={scenario.name}
-              onChange={(next) => patchApiNode(selectedApiNode.id, next)}
-              onToggleStartNode={() => toggleStartNode(selectedApiNode.id)}
-              onClose={() => setSelectedNodeId(null)}
-              onFocusNode={(id) => setSelectedNodeId(id)}
-              onEditGroup={(gid) => setEditingGroupId(gid)}
-              enableCallGraph={enableCallGraph}
-              caseSetForNode={caseSets.find((c) => c.anchorNodeId === selectedApiNode.id)}
-              onCaseSetChange={(next) => {
-                setDirty(true);
-                setCaseSets((cur) => {
-                  const others = cur.filter((c) => c.anchorNodeId !== selectedApiNode.id);
-                  return next ? [...others, next] : others;
-                });
-              }}
-            />
-          );
-        })()}
+        <InspectorPanel
+          selectedApiNode={selectedApiNode}
+          endpointLookup={endpointLookup}
+          scenariosUsingEndpoint={scenariosUsingEndpoint}
+          endpointStatsByKey={endpointStatsByKey}
+          run={run}
+          apiNodes={apiNodes}
+          edges={edges}
+          groups={groups}
+          caseSets={caseSets}
+          startNodeIds={startNodeIds}
+          scenarioName={scenario.name}
+          enableCallGraph={enableCallGraph}
+          onPatchNode={(id, patch) => patchApiNode(id, patch)}
+          onToggleStart={(id) => toggleStartNode(id)}
+          onClose={() => setSelectedNodeId(null)}
+          onFocusNode={(id) => setSelectedNodeId(id)}
+          onEditGroup={(gid) => setEditingGroupId(gid)}
+          onCaseSetChange={(anchorId, next) => {
+            setDirty(true);
+            setCaseSets((cur) => {
+              const others = cur.filter((c) => c.anchorNodeId !== anchorId);
+              return next ? [...others, next] : others;
+            });
+          }}
+        />
       </div>
     </div>
   );
-}
-
-function buildFromScenario(scenario: Scenario): { nodes: RFNode[]; edges: RFEdge[] } {
-  const apiNodes: RFNode<ApiNodeData>[] = scenario.nodes.map((n) => ({
-    id: n.id,
-    type: 'api',
-    position: n.position ? { x: n.position.x, y: n.position.y } : { x: 0, y: 0 },
-    data: {
-      label: n.label ?? n.id,
-      method: n.method.toUpperCase(),
-      path: n.path,
-      status: 'pending',
-      idle: true,
-    },
-  }));
-  const validNodeIds = new Set(scenario.nodes.map((n) => n.id));
-  const edges: RFEdge[] = scenario.edges
-    // Drop stale synthetic per-branch fan-out edges that may have leaked into a saved
-    // scenario from a pre-fix build (their `from`/`to` reference clone ids like `node@@key`).
-    .filter((e) => validNodeIds.has(e.from) && validNodeIds.has(e.to))
-    .map((e, i) => ({
-      id: `e-${i}-${e.from}-${e.to}`,
-      source: e.from,
-      target: e.to,
-    }));
-  // Use persisted positions when every node has one; otherwise run dagre auto-layout.
-  const allPersisted = scenario.nodes.length > 0 && scenario.nodes.every((n) => !!n.position);
-  const laidApi = allPersisted ? apiNodes : autoLayout(apiNodes, edges);
-
-  const groupNodes: RFNode<GroupAreaData>[] = (scenario.groups ?? [])
-    .filter((g) => g.bounds)
-    .map((g) => ({
-      id: groupRfId(g.id),
-      type: 'groupArea',
-      position: { x: g.bounds!.x, y: g.bounds!.y },
-      style: { width: g.bounds!.width, height: g.bounds!.height, zIndex: -1 },
-      data: {
-        label: g.label ?? g.id,
-        color: g.backgroundColor ?? colorForGroup(g.id),
-        count: g.repeat?.count,
-      },
-      draggable: true,
-      selectable: true,
-    }));
-
-  return { nodes: [...groupNodes, ...laidApi], edges };
-}
-
-const GROUP_RF_PREFIX = 'group::';
-function groupRfId(id: string): string { return `${GROUP_RF_PREFIX}${id}`; }
-function isGroupRfNode(n: RFNode): boolean { return n.id.startsWith(GROUP_RF_PREFIX); }
-function groupIdFromRf(rfId: string): string { return rfId.slice(GROUP_RF_PREFIX.length); }
-
-const CASE_RF_PREFIX = 'case::';
-function caseRfId(id: string): string { return `${CASE_RF_PREFIX}${id}`; }
-function isCaseRfNode(n: RFNode): boolean { return n.id.startsWith(CASE_RF_PREFIX); }
-function caseIdFromRf(rfId: string): string { return rfId.slice(CASE_RF_PREFIX.length); }
-function isStructuralRf(n: RFNode): boolean { return isGroupRfNode(n) || isCaseRfNode(n); }
-
-// Branch clones: synthetic api-node copies spawned per branch so the canvas literally shows
-// each iteration as a separate node fanned out from its original. Encoded as
-// `<originalNodeId>@@<branchKey>` in the RF id space; original `apiNodes[]` is unaware.
-const BRANCH_CLONE_SEP = '@@';
-const BRANCH_EDGE_PREFIX = 'bedge::';
-const BRANCH_LANE_SPREAD = 280;
-function branchCloneRfId(nodeId: string, branchKey: string): string {
-  return `${nodeId}${BRANCH_CLONE_SEP}${branchKey}`;
-}
-function parseBranchCloneRf(rfId: string): { nodeId: string; branchKey: string } | null {
-  const idx = rfId.indexOf(BRANCH_CLONE_SEP);
-  if (idx < 0) return null;
-  return { nodeId: rfId.slice(0, idx), branchKey: rfId.slice(idx + BRANCH_CLONE_SEP.length) };
-}
-function isBranchCloneRf(n: RFNode): boolean { return parseBranchCloneRf(n.id) !== null; }
-function isBranchCloneEdge(e: RFEdge): boolean { return e.id.startsWith(BRANCH_EDGE_PREFIX); }
-function branchCloneEdgeId(origEdgeId: string, branchKey: string): string {
-  return `${BRANCH_EDGE_PREFIX}${branchKey}::${origEdgeId}`;
-}
-/** True when this is a real, user-authored api node (not a structural rectangle or branch clone). */
-function isApiRf(n: RFNode): boolean { return !isStructuralRf(n) && !isBranchCloneRf(n); }
-
-/** BFS over edges from the anchor; returns set of reachable node ids (including the anchor). */
-function collectDescendants(anchorId: string, edges: RFEdge[]): Set<string> {
-  const out = new Set<string>([anchorId]);
-  const queue = [anchorId];
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    for (const e of edges) {
-      if (e.source === cur && !out.has(e.target)) {
-        out.add(e.target);
-        queue.push(e.target);
-      }
-    }
-  }
-  return out;
-}
-
-function seedFromEndpoint(id: string, ep: EndpointDescriptor): ApiNode {
-  const pathParameters: Record<string, unknown> = {};
-  const queryParameters: Record<string, unknown> = {};
-  const headers: Record<string, unknown> = {};
-
-  for (const p of ep.parameters ?? []) {
-    const v = p.defaultValue !== undefined ? p.defaultValue : '';
-    if (p.in === 'path') pathParameters[p.name] = v;
-    else if (p.in === 'query') queryParameters[p.name] = v;
-    else if (p.in === 'header') headers[p.name] = v;
-  }
-
-  let body: unknown;
-  const sample = ep.samples?.[0]?.jsonPayload;
-  if (sample) {
-    try { body = JSON.parse(sample); } catch { body = sample; }
-  } else {
-    const example = ep.requestBody?.content?.[0]?.example;
-    if (example !== undefined) body = example;
-  }
-
-  return {
-    id,
-    method: ep.method.toUpperCase(),
-    path: normalisePath(ep.path),
-    pathParameters,
-    queryParameters,
-    headers,
-    body,
-  };
-}
-
-/** Map a group id to one of N predefined ring colour buckets so multiple groups read distinct. */
-function groupHashClass(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return Math.abs(h) % 6;
-}
-
-function nextNodeId(existing: RFNode[], method: string, path: string): string {
-  const slug = `${method.toLowerCase()}_${path}`
-    .replace(/[{}]/g, '')
-    .replace(/[^a-z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  const taken = new Set(existing.map((n) => n.id));
-  if (!taken.has(slug)) return slug;
-  for (let i = 2; i < 1000; i++) {
-    const candidate = `${slug}_${i}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  return `${slug}_${Date.now()}`;
 }
 
 interface SaveStatusProps {
@@ -1631,23 +1468,3 @@ function SaveStatus({ dirty, saving, err, lastSavedAt, nowTick, onForceSave }: S
   );
 }
 
-/** Roll up a branch's per-node statuses into one chip status. */
-function aggregateBranchStatus(run: Run | null, key: string): 'running' | 'failed' | 'succeeded' | 'pending' {
-  if (!run) return 'pending';
-  const results = run.nodeResults.filter((r) => branchKey(r) === key);
-  if (results.length === 0) return 'pending';
-  if (results.some((r) => r.status === 'running' || r.status === 'paused')) return 'running';
-  if (results.some((r) => r.status === 'failed')) return 'failed';
-  if (results.every((r) => r.status === 'succeeded')) return 'succeeded';
-  return 'pending';
-}
-
-function formatAgo(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 5) return 'just now';
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return `${h}h ago`;
-}

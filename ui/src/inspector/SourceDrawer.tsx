@@ -4,6 +4,7 @@ import Prism from 'prismjs';
 import 'prismjs/components/prism-csharp';
 import { MethodFlowchart } from './MethodFlowchart';
 import { ServiceCallersList } from './ServiceCallersList';
+import { usePrefs } from '../stores/prefs';
 
 export interface MethodIndexEntry {
   id: string;
@@ -43,7 +44,6 @@ interface Props {
  * of the file so the eye lands on the relevant method instantly.
  */
 type ViewMode = 'source' | 'diagram' | 'callers';
-const VIEW_KEY = 'apicover.sourceDrawerView';
 
 function SourceDrawerImpl({ nodeId, path, line, endLine, methodName, methodIndex, onJumpTo, canGoBack, onBack, onClose }: Props) {
   const [slice, setSlice] = useState<SourceSlice | null>(null);
@@ -53,18 +53,14 @@ function SourceDrawerImpl({ nodeId, path, line, endLine, methodName, methodIndex
   // Service nodes use a dotted FQTN id; endpoints look like "METHOD /path". Only services
   // expose a meaningful reverse-fan-in caller list, so we gate the Callers tab on that shape.
   const isService = !nodeId.includes(' /') && nodeId.includes('.');
-  const [view, setView] = useState<ViewMode>(() => {
-    try {
-      const v = window.localStorage?.getItem(VIEW_KEY);
-      if (v === 'diagram') return 'diagram';
-      if (v === 'callers' && isService) return 'callers';
-      return 'source';
-    } catch { return 'source'; }
-  });
+  const storedView = usePrefs((s) => s.sourceDrawerView);
+  // 'callers' only makes sense for services — fall back to 'source' for endpoints.
+  const effectiveStored: ViewMode = storedView === 'callers' && !isService ? 'source' : storedView;
+  const [view, setView] = useState<ViewMode>(effectiveStored);
 
   function pickView(v: ViewMode) {
     setView(v);
-    try { window.localStorage?.setItem(VIEW_KEY, v); } catch { /* ignore */ }
+    usePrefs.getState().set('sourceDrawerView', v);
   }
 
   useEffect(() => {

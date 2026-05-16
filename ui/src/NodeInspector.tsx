@@ -10,6 +10,7 @@ import { CallGraphTab } from './inspector/CallGraphTab';
 import { HistoryTab } from './inspector/HistoryTab';
 import { parseMaybeJson, stringifyValue, type KV } from './inspector/KVEditor';
 import { staggerChild, staggerParent } from './inspector/animations';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 interface Props {
   node: ApiNode;
@@ -49,8 +50,19 @@ interface Props {
 /**
  * Right-side inspector for the currently selected canvas node. Pinned identity card +
  * 5-tab strip + tab content. Composes leaf components from `inspector/`.
+ *
+ * Wrapped in its own ErrorBoundary so a tab render exception (bad JSONLogic, malformed
+ * iteration data) does not kill the parent canvas.
  */
-export function NodeInspector({
+export function NodeInspector(props: Props) {
+  return (
+    <ErrorBoundary name="NodeInspector">
+      <NodeInspectorInner {...props} />
+    </ErrorBoundary>
+  );
+}
+
+function NodeInspectorInner({
   node,
   endpoint,
   isStartNode,

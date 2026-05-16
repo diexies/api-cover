@@ -1,8 +1,7 @@
 /**
  * Per-browser auth config used to attach credentials to every run's HTTP requests.
- * Persisted to localStorage so the user doesn't have to retype their token each session.
- * Stored client-side only — never sent to the backend until run start, and the backend
- * forwards it verbatim on the wire (no logging, no persistence).
+ * Persisted via the central prefs store so the user doesn't have to retype their token
+ * each session. Stored client-side only — never sent to the backend until run start.
  */
 
 export type AuthType = 'none' | 'bearer' | 'apiKey' | 'basic';
@@ -15,26 +14,18 @@ export interface AuthConfig {
   basic?: { username: string; password: string };
 }
 
-const STORAGE_KEY = 'utopia.inspector.auth';
+import { usePrefs } from './stores/prefs';
 
 export function loadAuth(): AuthConfig {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { type: 'none' };
-    const parsed = JSON.parse(raw) as AuthConfig;
-    if (!parsed.type) return { type: 'none' };
-    return parsed;
-  } catch {
-    return { type: 'none' };
-  }
+  return usePrefs.getState().auth;
 }
 
 export function saveAuth(cfg: AuthConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+  usePrefs.getState().set('auth', cfg);
 }
 
 export function clearAuth(): void {
-  localStorage.removeItem(STORAGE_KEY);
+  usePrefs.getState().set('auth', { type: 'none' });
 }
 
 /** Build the run-options shape the backend accepts. Returns empty maps when type === 'none'. */

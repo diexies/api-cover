@@ -13,23 +13,17 @@ import { AgentPanel } from './AgentPanel';
 import { ServiceMapPanel } from './inspector/ServiceMapPanel';
 import { CommandPalette, type PaletteCommand } from './CommandPalette';
 import { coverage } from './home/utils';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { usePrefs } from './stores/prefs';
 
 type SidebarMode = 'scenarios' | 'endpoints' | 'services' | 'inspector';
 type DashboardSection = 'home' | 'stats' | 'scenarios';
 
-const LAST_SCENARIO_KEY = 'apicover.lastScenarioId';
-
 function readLastScenarioId(): string | null {
-  try {
-    const v = localStorage.getItem(LAST_SCENARIO_KEY);
-    return v && v.length > 0 ? v : null;
-  } catch { return null; }
+  return usePrefs.getState().lastScenarioId;
 }
 function writeLastScenarioId(id: string | null) {
-  try {
-    if (id) localStorage.setItem(LAST_SCENARIO_KEY, id);
-    else localStorage.removeItem(LAST_SCENARIO_KEY);
-  } catch { /* storage disabled / quota — ignore */ }
+  usePrefs.getState().set('lastScenarioId', id);
 }
 
 export function App() {
@@ -71,7 +65,7 @@ export function App() {
   async function handleAgentRunCompleted(modeLabel: string | null) {
     if (modeLabel !== 'scenario' && modeLabel !== 'discover') return;
     if (modeLabel === 'discover') {
-      try { localStorage.removeItem('apicover.idleDiscoverInflight'); } catch { /* quota */ }
+      usePrefs.getState().setIdleDiscover('inflightAt', null);
     }
     try {
       const list = await listScenarios();
@@ -82,19 +76,18 @@ export function App() {
         setSidebar('scenarios');
       }
       if (modeLabel === 'discover' && list.length > 0) {
-        try { localStorage.setItem('apicover.idleDiscoverDismissed.v2', '1'); } catch { /* quota */ }
+        usePrefs.getState().setIdleDiscover('dismissed', true);
       }
     } catch {
       /* surface via existing error state on next reload; non-fatal */
     }
   }
 
-  // Open the global settings modal, optionally pinning a specific tab. The
-  // modal reads the active tab from localStorage on mount, so writing the
-  // key first makes the open land where the caller intends.
+  // Open the global settings modal, optionally pinning a specific tab. The modal reads
+  // the active tab from the prefs store on mount, so writing first lands the caller's tab.
   function openGlobalSettings(tab?: 'auth' | 'agent' | 'settings') {
     if (tab) {
-      try { localStorage.setItem('apicover.settingsTab', tab); } catch { /* quota */ }
+      usePrefs.getState().set('settingsTab', tab);
     }
     setGlobalSettingsOpen(true);
   }
@@ -129,23 +122,17 @@ export function App() {
     if (!agentStatus) return;
     const ready = agentStatus.mode !== 'Disabled' && (agentStatus.mode === 'Max' || agentStatus.hasApiKey);
     if (!ready) return;
-    let dismissed = false;
-    let inflight = false;
-    try {
-      dismissed = localStorage.getItem('apicover.idleDiscoverDismissed.v2') === '1';
-      // In-flight semaphore — survives reload during a long-running idle discover so
-      // refreshing the page doesn't fire a second concurrent run. Stale entries older
-      // than 15 minutes are ignored (assumes the previous run died without cleanup).
-      const flightRaw = localStorage.getItem('apicover.idleDiscoverInflight');
-      if (flightRaw) {
-        const ts = Number(flightRaw);
-        if (Number.isFinite(ts) && Date.now() - ts < 15 * 60_000) inflight = true;
-      }
-    } catch { /* quota */ }
+    // In-flight semaphore — survives reload during a long-running idle discover so
+    // refreshing the page doesn't fire a second concurrent run. Stale entries older
+    // than 15 minutes are ignored (assumes the previous run died without cleanup).
+    const prefs = usePrefs.getState();
+    const dismissed = prefs.idleDiscover.dismissed;
+    const flightAt = prefs.idleDiscover.inflightAt;
+    const inflight = flightAt != null && Date.now() - flightAt < 15 * 60_000;
     if (dismissed || inflight) return;
     didIdleDiscoverRef.current = true;
     knownScenarioIdsRef.current = new Set();
-    try { localStorage.setItem('apicover.idleDiscoverInflight', String(Date.now())); } catch { /* quota */ }
+    prefs.setIdleDiscover('inflightAt', Date.now());
     openAgentWithPrompt('Inspect this API and propose likely scenarios.', 'discover');
     // Persist dismiss only after run completes (in handleAgentRunCompleted), not now —
     // otherwise a failed/cancelled run leaves the user with no scenarios and no re-fire.
@@ -421,45 +408,53 @@ export function App() {
         <main className="content">
           {error && <div className="error banner">{error}</div>}
           {sidebar === 'inspector' && (
-            <ServiceMapPanel onClose={() => setSidebar('scenarios')} />
+            <ErrorBoundary name="ServiceMapPanel">
+              <ServiceMapPanel onClose={() => setSidebar('scenarios')} />
+            </ErrorBoundary>
           )}
           {sidebar !== 'inspector' && !selected && !error && (
-            <Dashboard
-              scenarios={scenarios}
-              endpoints={endpoints}
-              runs={runs}
-              agentEnabled={agentDocked}
-              agentStatus={agentStatus}
-              auth={auth}
-              section={dashboardSection}
-              onSectionChange={setDashboardSection}
-              onOpenGlobalSettings={(tab) => openGlobalSettings(tab)}
-              onSendPrompt={openAgentWithPrompt}
-            />
+            <ErrorBoundary name="Dashboard">
+              <Dashboard
+                scenarios={scenarios}
+                endpoints={endpoints}
+                runs={runs}
+                agentEnabled={agentDocked}
+                agentStatus={agentStatus}
+                auth={auth}
+                section={dashboardSection}
+                onSectionChange={setDashboardSection}
+                onOpenGlobalSettings={(tab) => openGlobalSettings(tab)}
+                onSendPrompt={openAgentWithPrompt}
+              />
+            </ErrorBoundary>
           )}
           {sidebar !== 'inspector' && selected && (
-            <ScenarioCanvas
-              scenario={selected}
-              endpointLookup={endpointLookup}
-              scenariosUsingEndpoint={scenariosUsingEndpoint}
-              endpointStatsByKey={endpointStatsByKey}
-              auth={auth}
-              enableCallGraph={enableCallGraph}
-              onSaved={onScenarioSaved}
-            />
+            <ErrorBoundary name="ScenarioCanvas">
+              <ScenarioCanvas
+                scenario={selected}
+                endpointLookup={endpointLookup}
+                scenariosUsingEndpoint={scenariosUsingEndpoint}
+                endpointStatsByKey={endpointStatsByKey}
+                auth={auth}
+                enableCallGraph={enableCallGraph}
+                onSaved={onScenarioSaved}
+              />
+            </ErrorBoundary>
           )}
         </main>
         {agentDocked && agentStatus && (
-          <AgentPanel
-            status={agentStatus}
-            onOpenSettings={(tab) => openGlobalSettings(tab)}
-            initialPrompt={pendingAgentPrompt ?? undefined}
-            initialPromptMode={pendingAgentMode ?? undefined}
-            autoStart={pendingAgentPrompt !== null}
-            onPromptConsumed={() => { setPendingAgentPrompt(null); setPendingAgentMode(null); }}
-            onStatusChanged={setAgentStatus}
-            onRunCompleted={handleAgentRunCompleted}
-          />
+          <ErrorBoundary name="AgentPanel">
+            <AgentPanel
+              status={agentStatus}
+              onOpenSettings={(tab) => openGlobalSettings(tab)}
+              initialPrompt={pendingAgentPrompt ?? undefined}
+              initialPromptMode={pendingAgentMode ?? undefined}
+              autoStart={pendingAgentPrompt !== null}
+              onPromptConsumed={() => { setPendingAgentPrompt(null); setPendingAgentMode(null); }}
+              onStatusChanged={setAgentStatus}
+              onRunCompleted={handleAgentRunCompleted}
+            />
+          </ErrorBoundary>
         )}
       </div>
       <CommandPalette commands={paletteCommands} />

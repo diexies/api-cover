@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import type { Scenario } from './api';
+import { usePrefs } from './stores/prefs';
 
 interface Props {
   scenarios: Scenario[];
@@ -7,22 +7,14 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
-const STORAGE_KEY = 'utopia.inspector.sidebar.sections';
 type Sections = { complex: boolean; oneDir: boolean };
 
-function loadSections(): Sections {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<Sections>;
-      const complex = parsed.complex ?? true;
-      const oneDir = parsed.oneDir ?? true;
-      // Both can never be closed at the same time — fall back to both open.
-      if (!complex && !oneDir) return { complex: true, oneDir: true };
-      return { complex, oneDir };
-    }
-  } catch { /* ignore */ }
-  return { complex: true, oneDir: true };
+function readSections(map: Record<string, boolean>): Sections {
+  const complex = map.complex ?? true;
+  const oneDir = map.oneDir ?? true;
+  // Both can never be closed at the same time — fall back to both open.
+  if (!complex && !oneDir) return { complex: true, oneDir: true };
+  return { complex, oneDir };
 }
 
 function isComplex(s: Scenario): boolean {
@@ -31,23 +23,25 @@ function isComplex(s: Scenario): boolean {
 
 /**
  * Sidebar scenario list, split into two collapsible sections (Complex vs One-Direction).
- * Invariant: at least one section stays open. State persists in localStorage.
+ * Invariant: at least one section stays open. State persists via the central prefs store.
  */
 export function ScenarioList({ scenarios, selectedId, onSelect }: Props) {
-  const [sections, setSections] = useState<Sections>(() => loadSections());
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sections));
-  }, [sections]);
+  const sectionMap = usePrefs((s) => s.scenarioListSections);
+  const setSection = usePrefs((s) => s.setScenarioListSection);
+  const sections = readSections(sectionMap);
 
   function toggle(key: keyof Sections) {
-    setSections((cur) => {
-      const next: Sections = { ...cur, [key]: !cur[key] };
-      // Enforce: one must remain open. If user just closed the last open one, force the other open.
-      if (!next.complex && !next.oneDir) {
-        return key === 'complex' ? { complex: false, oneDir: true } : { complex: true, oneDir: false };
-      }
-      return next;
-    });
+    const next: Sections = { ...sections, [key]: !sections[key] };
+    // Enforce: one must remain open. If user just closed the last open one, force the other open.
+    if (!next.complex && !next.oneDir) {
+      const corrected = key === 'complex'
+        ? { complex: false, oneDir: true }
+        : { complex: true, oneDir: false };
+      setSection('complex', corrected.complex);
+      setSection('oneDir', corrected.oneDir);
+      return;
+    }
+    setSection(key, next[key]);
   }
 
   if (scenarios.length === 0) {

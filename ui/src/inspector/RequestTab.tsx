@@ -2,6 +2,7 @@ import type { ApiNode, EndpointDescriptor } from '../api';
 import { BodyForm } from '../BodyForm';
 import { KVEditor, type KV } from './KVEditor';
 import { TermGroup } from './TermGroup';
+import { JsonLogicHint } from '../components/JsonLogicHint';
 
 interface Props {
   node: ApiNode;
@@ -86,6 +87,7 @@ export function RequestTab({
           <div className="term-segmented">
             <button className={bodyMode === 'form' ? 'active' : ''} onClick={(e) => { e.stopPropagation(); onSetBodyMode('form'); }}>form</button>
             <button className={bodyMode === 'raw' ? 'active' : ''} onClick={(e) => { e.stopPropagation(); onSetBodyMode('raw'); }}>raw</button>
+            <JsonLogicHint ctx="default" triggerLabel="JSONLogic help" />
           </div>
         }
       >

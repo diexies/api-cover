@@ -1,5 +1,6 @@
 import type { ApiNode, CaseSet, CaseVariant, ExecutionGroup, NodeFieldOverride } from '../api';
 import { BranchSimulator } from './BranchSimulator';
+import { JsonLogicHint } from '../components/JsonLogicHint';
 
 interface Props {
   node: ApiNode;
@@ -131,6 +132,7 @@ export function BranchingTab({ node, groupsForNode, onEditGroup, caseSet, onCase
                 onChange={(e) => patchCaseSet({ label: e.target.value || undefined })}
               />
               <span className="muted small">{`fork → ${caseSet!.variants.length} branches`}</span>
+              <JsonLogicHint ctx="default" triggerLabel="Variant overrides accept literals or JSONLogic" />
               <button className="term-action danger" onClick={removeCaseSet}>[remove]</button>
             </div>
             {caseSet!.variants.map((v, vi) => (
