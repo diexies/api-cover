@@ -99,6 +99,12 @@ function ApiNodeViewImpl({ data }: NodeProps & { data: ApiNodeData }) {
         </span>
       )}
       <Handle type="target" position={Position.Top} />
+      {data.status === 'failed' && data.error && (
+        <div className="api-node-error-chip" role="alert" title={data.error}>
+          <span className="api-node-error-icon" aria-hidden="true">✗</span>
+          <span className="api-node-error-msg">{data.error}</span>
+        </div>
+      )}
       <div className="api-node-row">
         <span className={`method-badge ${methodClass[data.method] ?? ''}`}>{data.method}</span>
         <span className="path">{data.path}</span>

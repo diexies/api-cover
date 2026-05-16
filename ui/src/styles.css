@@ -2545,7 +2545,12 @@ code {
 .api-node.node-pending   { opacity: 0.55; }
 .api-node.node-running   { border-color: var(--st-running-fg); box-shadow: 0 0 0 4px var(--st-running-bg); animation: pulse 1.4s infinite; }
 .api-node.node-succeeded { border-color: var(--st-success-fg); }
-.api-node.node-failed    { border-color: var(--st-fail-fg);    background: var(--st-fail-bg); }
+.api-node.node-failed {
+  border-color: var(--st-fail-fg);
+  /* Solid background (not the translucent --st-fail-bg) so the error chip on the
+     left is fully legible against the canvas grid. */
+  background: color-mix(in srgb, var(--st-fail-fg) 18%, var(--bg));
+}
 .api-node.node-skipped   { opacity: 0.4; border-style: dashed; }
 .api-node.node-paused    { border-color: var(--st-warn-fg);    background: var(--st-warn-bg); animation: pulse 1.4s infinite; }
 .api-node.node-cancelled { opacity: 0.5; border-color: var(--muted); }
@@ -7699,4 +7704,48 @@ code {
   background: var(--surface-2);
   padding: 0 var(--sp-2);
   border-radius: 3px;
+}
+
+/* Inline error chip docked to the left edge of a failed api node.
+   Solid background — no transparency — so it stays legible over the canvas grid
+   and over any sibling content to the left. Stacks vertically (above the node row)
+   so it never overlaps the method/path line. */
+.api-node-error-chip {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 0;
+  max-width: 280px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--st-fail-fg);
+  color: #fff;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  z-index: 11;
+  pointer-events: auto;
+  /* Triangle pointer connecting chip to the node. */
+}
+.api-node-error-chip::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 12px;
+  width: 0; height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 6px solid var(--st-fail-fg);
+}
+.api-node-error-icon {
+  font-weight: var(--fw-bold);
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.api-node-error-msg {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
