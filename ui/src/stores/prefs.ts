@@ -29,6 +29,10 @@ export interface PrefsState {
   theme: ThemeChoice;
   /** Width-by-key map for every column that uses useResizableWidth. */
   widths: Record<string, number>;
+  /** Toggle for the run history drawer on the scenario canvas (right-side overlay). */
+  runHistoryOpen: boolean;
+  /** Last tab the user had open in the NodeInspector — restored when re-opening any node. */
+  inspectorTab: string;
 }
 
 export interface PrefsActions {
@@ -61,6 +65,8 @@ const defaultState: PrefsState = {
   locale: detectInitialLocale(),
   theme: 'system',
   widths: {},
+  runHistoryOpen: false,
+  inspectorTab: 'overview',
 };
 
 const STORAGE_KEY = 'apicover.prefs.v1';

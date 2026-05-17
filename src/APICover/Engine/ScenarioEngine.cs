@@ -101,11 +101,16 @@ public sealed class ScenarioEngine : IScenarioEngine
 
     private async Task ExecuteAsync(Scenario scenario, Run run, RunOptions options, CancellationToken cancellationToken)
     {
-        var nodesById = scenario.Nodes.ToDictionary(n => n.Id, n => n);
+        // Dedupe nodes by id — legacy scenarios may have duplicate ids that crash
+        // ToDictionary. Keep the first occurrence, drop the rest. UI's onSave heals
+        // these gradually but the engine must tolerate live blobs in the meantime.
+        var seen = new HashSet<string>();
+        var dedupedNodes = scenario.Nodes.Where(n => seen.Add(n.Id)).ToList();
+        var nodesById = dedupedNodes.ToDictionary(n => n.Id, n => n);
         var outgoing = scenario.Edges.GroupBy(e => e.From).ToDictionary(g => g.Key, g => g.ToList());
 
         var inDegree = new Dictionary<string, int>();
-        foreach (var n in scenario.Nodes) inDegree[n.Id] = 0;
+        foreach (var n in dedupedNodes) inDegree[n.Id] = 0;
         foreach (var e in scenario.Edges) inDegree[e.To] = inDegree.GetValueOrDefault(e.To) + 1;
 
         IEnumerable<ApiNode> startNodes = scenario.StartNodeIds.Count > 0
@@ -342,9 +347,11 @@ public sealed class ScenarioEngine : IScenarioEngine
                 if (!wasFannedOut)
                 {
                     nodeResult.Response = response;
-                    nodeResult.Status = response.Status >= 200 && response.Status < 400
-                        ? NodeStatus.Succeeded
-                        : NodeStatus.Failed;
+                    // Any HTTP response — including 4xx and 5xx — counts as a successful
+                    // delivery from the run engine's perspective. The user wires their own
+                    // assertions (shouldRun predicates, downstream branching) to decide
+                    // what's "wrong". Network/parse errors still fail via the catch below.
+                    nodeResult.Status = NodeStatus.Succeeded;
                     nodeResult.CompletedAt = DateTimeOffset.UtcNow;
                 }
 
@@ -478,9 +485,9 @@ public sealed class ScenarioEngine : IScenarioEngine
             }
 
             variantResult.Response = response;
-            variantResult.Status = response.Status >= 200 && response.Status < 400
-                ? NodeStatus.Succeeded
-                : NodeStatus.Failed;
+            // Same status policy as the main path — any delivered response counts as a
+            // successful invocation; user assertions decide pass/fail downstream.
+            variantResult.Status = NodeStatus.Succeeded;
             variantResult.CompletedAt = DateTimeOffset.UtcNow;
 
             // Build a forked branch state — its context carries this variant's anchor result

@@ -83,11 +83,18 @@ export function useNodeStatusOverlay({
       return { result: undefined, offBranch: run !== null };
     }
 
-    setNodes((current) =>
-      current.map((n) => {
+    setNodes((current) => {
+      let changed = false;
+      // Index for api nodes (originals only, branch clones excluded) drives balloon side
+      // alternation — first node opens right, second left, third right, etc. so adjacent
+      // balloons don't stack on top of each other.
+      let apiIndex = -1;
+      const next = current.map((n) => {
         if (isStructuralRf(n)) return n; // group / case areas don't carry status
         const cloned = parseBranchCloneRf(n.id);
         const lookupId = cloned ? cloned.nodeId : n.id;
+        if (!cloned) apiIndex++;
+        const balloonSide: 'left' | 'right' = apiIndex >= 0 && apiIndex % 2 === 1 ? 'left' : 'right';
         const { result, offBranch } = resolveResult(n.id);
         const status: NodeStatus = result?.status ?? 'pending';
         const gid = nodeToGroup.get(lookupId);
@@ -102,27 +109,49 @@ export function useNodeStatusOverlay({
         const dimCls = offBranch ? 'node-off-branch' : '';
         const cloneCls = cloned ? 'node-branch-clone' : '';
         const className = [groupCls, dimCls, cloneCls].filter(Boolean).join(' ') || undefined;
-        return {
-          ...n,
-          className,
-          data: {
-            ...n.data,
-            status,
-            response: result?.response?.body,
-            error: result?.error,
-            idle,
-            hasBreakpoint: !cloned && bpSet.has(lookupId),
-            groupCount: cloned ? 0 : myGroups.length,
-            cartesianIterations: cloned ? 1 : cartesian,
-            isStart: !cloned && startNodeIds.includes(lookupId),
-            caseVariantCount: cloned ? 0 : (anchor?.variants.length ?? 0),
-            caseAnchorColor: cloned ? undefined : anchor?.backgroundColor,
-          },
+        const prev = n.data as Record<string, unknown>;
+        const desiredData = {
+          status,
+          response: result?.response?.body,
+          responseStatus: result?.response?.status,
+          responseHeaders: result?.response?.headers,
+          request: result?.request,
+          error: result?.error,
+          idle,
+          hasBreakpoint: !cloned && bpSet.has(lookupId),
+          groupCount: cloned ? 0 : myGroups.length,
+          cartesianIterations: cloned ? 1 : cartesian,
+          isStart: !cloned && startNodeIds.includes(lookupId),
+          caseVariantCount: cloned ? 0 : (anchor?.variants.length ?? 0),
+          caseAnchorColor: cloned ? undefined : anchor?.backgroundColor,
+          balloonSide,
         };
-      }),
-    );
-    setEdges((current) =>
-      current.map((e) => {
+        // Idempotency: bail if className + every overlay field already match.
+        const sameClass = (n.className ?? undefined) === className;
+        const sameData = sameClass
+          && prev.status === desiredData.status
+          && prev.response === desiredData.response
+          && prev.responseStatus === desiredData.responseStatus
+          && prev.responseHeaders === desiredData.responseHeaders
+          && prev.request === desiredData.request
+          && prev.error === desiredData.error
+          && prev.idle === desiredData.idle
+          && prev.hasBreakpoint === desiredData.hasBreakpoint
+          && prev.groupCount === desiredData.groupCount
+          && prev.cartesianIterations === desiredData.cartesianIterations
+          && prev.isStart === desiredData.isStart
+          && prev.caseVariantCount === desiredData.caseVariantCount
+          && prev.caseAnchorColor === desiredData.caseAnchorColor
+          && prev.balloonSide === desiredData.balloonSide;
+        if (sameData) return n;
+        changed = true;
+        return { ...n, className, data: { ...n.data, ...desiredData } };
+      });
+      return changed ? next : current;
+    });
+    setEdges((current) => {
+      let changed = false;
+      const next = current.map((e) => {
         const from = resolveResult(e.source);
         const to = resolveResult(e.target);
         const fromStatus = from.result?.status;
@@ -134,13 +163,12 @@ export function useNodeStatusOverlay({
           && (toStatus === 'succeeded' || toStatus === 'running' || toStatus === 'failed');
         const cls = [traversed ? 'edge-traversed' : '', offBranch ? 'edge-off-branch' : '']
           .filter(Boolean).join(' ');
-        return {
-          ...e,
-          animated: active,
-          className: cls,
-        };
-      }),
-    );
+        if (!!e.animated === active && (e.className ?? '') === cls) return e;
+        changed = true;
+        return { ...e, animated: active, className: cls };
+      });
+      return changed ? next : current;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run, breakpoints, groups, caseSets, startNodeIds, selectedBranchKey]);
 }

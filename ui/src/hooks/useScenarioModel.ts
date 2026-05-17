@@ -272,12 +272,17 @@ export function useScenarioModel(args: UseScenarioModelArgs): UseScenarioModelRe
         return { ...g, bounds, nodeIds: memberIds };
       });
 
-      // Snapshot RF positions back into ApiNode.position so they survive reload.
+      // Snapshot RF positions back into ApiNode.position so they survive reload. Also
+      // dedupe by id — legacy scenarios occasionally have duplicate ids that crash the
+      // engine's BranchEstimator; collapsing on save heals them gradually.
       const rfPosById = new Map(apiRf.map((n) => [n.id, n.position] as const));
-      const nodesWithPos = apiNodes.map((n) => {
-        const p = rfPosById.get(n.id);
-        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-      });
+      const seen = new Set<string>();
+      const nodesWithPos = apiNodes
+        .filter((n) => seen.has(n.id) ? false : (seen.add(n.id), true))
+        .map((n) => {
+          const p = rfPosById.get(n.id);
+          return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+        });
 
       const merged: Scenario = {
         ...scenario,

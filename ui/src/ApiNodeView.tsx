@@ -2,6 +2,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { memo, useEffect, useState } from 'react';
 import type { NodeStatus } from './api';
 import { hexToRgba } from './colors';
+import { ResponseViewer } from './components/ResponseViewer';
 
 export interface ApiNodeData extends Record<string, unknown> {
   label: string;
@@ -9,6 +10,11 @@ export interface ApiNodeData extends Record<string, unknown> {
   path: string;
   status: NodeStatus;
   response?: unknown;
+  /** Full response snapshot including status code + headers, surfaced for ResponseViewer. */
+  responseStatus?: number;
+  responseHeaders?: Record<string, string>;
+  /** Request snapshot — method/path/headers/body actually sent during the run. */
+  request?: { method?: string; path?: string; headers?: Record<string, string>; body?: unknown };
   error?: string;
   hasBreakpoint?: boolean;
   /** True when no run is active; suppresses the "pending = faded" treatment for editing. */
@@ -23,6 +29,9 @@ export interface ApiNodeData extends Record<string, unknown> {
   caseVariantCount?: number;
   /** Optional case-anchor tint for the badge. */
   caseAnchorColor?: string;
+  /** Side the response balloon should anchor to — alternates per node so neighbours
+   *  don't overlap when a whole chain has responses open. */
+  balloonSide?: 'left' | 'right';
   /** When this RF node is a per-branch fan-out clone, the human-readable branch label
    *  (e.g. "g_alpha ×2") rendered as a small corner pill so the user can tell iterations apart. */
   branchLabel?: string;
@@ -143,11 +152,19 @@ function ApiNodeViewImpl({ data }: NodeProps & { data: ApiNodeData }) {
         </button>
       )}
       {open && canShowResponse && (
-        <div className="response-balloon" onClick={(e) => e.stopPropagation()}>
-          {data.error && <div className="error">error: {data.error}</div>}
-          {data.response !== undefined && (
-            <pre>{JSON.stringify(data.response, null, 2)}</pre>
-          )}
+        <div
+          className={`response-balloon balloon-${data.balloonSide ?? 'right'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Error chip already lives on the left edge; balloon focuses on body/status. */}
+          <ResponseViewer
+            compact
+            response={{
+              status: data.responseStatus,
+              headers: data.responseHeaders,
+              body: data.response,
+            }}
+          />
         </div>
       )}
       <Handle type="source" position={Position.Bottom} />

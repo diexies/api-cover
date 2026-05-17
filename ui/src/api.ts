@@ -277,15 +277,44 @@ export interface ScenarioHistoryEntry {
 }
 
 export async function listScenarioHistory(scenarioId: string): Promise<ScenarioHistoryEntry[]> {
-  return apiJson<ScenarioHistoryEntry[]>(
+  const raw = await apiJson<ScenarioHistoryEntry[]>(
     `${apiBase}/scenarios/${encodeURIComponent(scenarioId)}/history`,
   );
+  // Older disk-persisted entries serialise status as a numeric enum; coerce to the
+  // string form the UI's CSS + comparisons expect.
+  const runMap = ['pending', 'running', 'succeeded', 'failed', 'cancelled', 'paused'];
+  return raw.map((e) => ({
+    ...e,
+    status: typeof (e as unknown as { status: unknown }).status === 'number'
+      ? (runMap[(e as unknown as { status: number }).status] ?? 'pending')
+      : e.status,
+  }));
 }
 
 export async function getScenarioHistoryRun(scenarioId: string, runId: string): Promise<Run> {
-  return apiJson<Run>(
+  const raw = await apiJson<Run>(
     `${apiBase}/scenarios/${encodeURIComponent(scenarioId)}/history/${encodeURIComponent(runId)}`,
   );
+  return normaliseRunStatuses(raw);
+}
+
+/** Older disk-persisted runs serialise NodeStatus as integers (0..6). Live SSE delivers
+ *  string enum values. Coerce to the string form so the UI doesn't have to branch. */
+function normaliseRunStatuses(run: Run): Run {
+  const nodeMap: NodeStatus[] = ['pending', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled'];
+  const runMap: RunStatus[] = ['pending', 'running', 'succeeded', 'failed', 'cancelled', 'paused'];
+  return {
+    ...run,
+    status: typeof (run as unknown as { status: unknown }).status === 'number'
+      ? (runMap[(run as unknown as { status: number }).status] ?? 'pending')
+      : run.status,
+    nodeResults: run.nodeResults.map((nr) => ({
+      ...nr,
+      status: typeof (nr as unknown as { status: unknown }).status === 'number'
+        ? (nodeMap[(nr as unknown as { status: number }).status] ?? 'pending')
+        : nr.status,
+    })),
+  };
 }
 
 export interface GitCommit {

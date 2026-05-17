@@ -1,10 +1,11 @@
-export type InspectorTab = 'overview' | 'request' | 'wiring' | 'branching' | 'internals' | 'history';
+export type InspectorTab = 'overview' | 'request' | 'response' | 'wiring' | 'branching' | 'internals' | 'history';
 
-const TABS: InspectorTab[] = ['overview', 'request', 'wiring', 'branching', 'internals', 'history'];
+const TABS: InspectorTab[] = ['overview', 'request', 'response', 'wiring', 'branching', 'internals', 'history'];
 
 const TAB_LABELS: Record<InspectorTab, string> = {
   overview: 'overview',
   request: 'req',
+  response: 'res',
   wiring: 'wire',
   branching: 'branch',
   internals: 'inter',

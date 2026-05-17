@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ReactFlow,
   Background,
@@ -24,13 +25,14 @@ import { useRunExecution } from './hooks/useRunExecution';
 import { useBranchClones } from './hooks/useBranchClones';
 import { useScenarioModel } from './hooks/useScenarioModel';
 import { useScenarioHistory, type ScenarioSnapshot } from './hooks/useScenarioHistory';
+import { usePrefs } from './stores/prefs';
 import { type AuthConfig } from './auth';
 import { GroupSettingsModal } from './GroupSettingsModal';
 import { BulkEditModal } from './BulkEditModal';
+import { ScenarioDetailModal } from './ScenarioDetailModal';
 import { wouldCreateCycle } from './dag';
 import { normalisePath } from './App';
 import { useVisibilityTicker } from './hooks/useVisibilityTicker';
-import { FlowHeader } from './FlowHeader';
 import { RunHistoryPanel } from './RunHistoryPanel';
 import { BranchDiagram } from './inspector/BranchDiagram';
 import { QuickCallPanel } from './QuickCallPanel';
@@ -112,6 +114,10 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  // True when a historical run is loaded into the canvas via the history drawer. In this
+  // mode mutators no-op (dirty stays false → autosave skipped) and a banner offers Exit.
+  const [historicalRunId, setHistoricalRunId] = useState<string | null>(null);
   // Refs that mirror selectedNodeId / selectedIds for the model hook's mutators.
   const selectedNodeIdRef = useRef<string | null>(null);
   selectedNodeIdRef.current = selectedNodeId;
@@ -173,31 +179,85 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   } = model;
 
   // ─── Undo/redo ─────────────────────────────────────────────────────────
-  const currentSnapshot: ScenarioSnapshot = {
+  // Memoise the snapshot so the history hook's effect only re-runs when one of the
+  // tracked fields actually changes — without this, every parent render produced a fresh
+  // object reference and the hook tried to push on every tick (Max update depth).
+  const currentSnapshot = useMemo<ScenarioSnapshot>(() => ({
     apiNodes, breakpoints, startNodeIds, groups, caseSets,
     flowName, flowDescription, flowTags,
-  };
+  }), [apiNodes, breakpoints, startNodeIds, groups, caseSets,
+       flowName, flowDescription, flowTags]);
+  const applySnapshot = useCallback((snap: ScenarioSnapshot) => {
+    setApiNodes(snap.apiNodes);
+    setBreakpoints(snap.breakpoints);
+    setStartNodeIds(snap.startNodeIds);
+    setGroups(snap.groups);
+    setCaseSets(snap.caseSets);
+    setFlowName(snap.flowName);
+    setFlowDescription(snap.flowDescription);
+    setFlowTags(snap.flowTags);
+  }, [setApiNodes, setBreakpoints, setStartNodeIds, setGroups, setCaseSets,
+      setFlowName, setFlowDescription, setFlowTags]);
   const history = useScenarioHistory({
     current: currentSnapshot,
-    apply: (snap) => {
-      setApiNodes(snap.apiNodes);
-      setBreakpoints(snap.breakpoints);
-      setStartNodeIds(snap.startNodeIds);
-      setGroups(snap.groups);
-      setCaseSets(snap.caseSets);
-      setFlowName(snap.flowName);
-      setFlowDescription(snap.flowDescription);
-      setFlowTags(snap.flowTags);
-    },
+    apply: applySnapshot,
   });
 
-  // Cmd+Z / Ctrl+Z undo, Cmd+Shift+Z / Ctrl+Y redo. Skip when focus is inside a text
-  // entry control so we don't trample the native input undo buffer.
+  // Clipboard buffer for canvas-scoped copy/cut/paste. Stores plain ApiNode snapshots —
+  // never touches the OS clipboard, so it doesn't fight with text-input copy/paste.
+  const clipboardRef = useRef<ApiNode[]>([]);
+
+  // Cmd+Z / Ctrl+Z undo, Cmd+Shift+Z / Ctrl+Y redo, Cmd/Ctrl+C/X/V/D for selection
+  // copy / cut / paste / duplicate. Skip when focus is inside a text entry control so
+  // native input shortcuts (and the undo buffer) keep working there.
   useEffect(() => {
     function isInsideInput(t: EventTarget | null): boolean {
       if (!t || !(t instanceof HTMLElement)) return false;
       const tag = t.tagName;
       return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+    }
+    function clipboardCopy(): void {
+      const ids = selectedIds.length > 0 ? selectedIds : (selectedNodeId ? [selectedNodeId] : []);
+      if (ids.length === 0) return;
+      const snap = apiNodes.filter((n) => ids.includes(n.id));
+      if (snap.length === 0) return;
+      clipboardRef.current = snap.map((n) => JSON.parse(JSON.stringify(n)));
+    }
+    function clipboardPaste(offsetX = 40, offsetY = 40): void {
+      if (clipboardRef.current.length === 0) return;
+      const existing = nodes;
+      const clones: ApiNode[] = [];
+      const rfClones: RFNode[] = [];
+      for (const src of clipboardRef.current) {
+        const newId = nextNodeId(existing.concat(rfClones), src.method, src.path);
+        const cloned: ApiNode = {
+          ...src,
+          id: newId,
+          position: src.position
+            ? { x: src.position.x + offsetX, y: src.position.y + offsetY }
+            : { x: offsetX, y: offsetY },
+        };
+        clones.push(cloned);
+        rfClones.push({
+          id: newId,
+          type: 'api',
+          position: cloned.position!,
+          data: { label: newId, method: src.method.toUpperCase(), path: src.path, status: 'pending', idle: true },
+        });
+      }
+      setApiNodes((cur) => [...cur, ...clones]);
+      setNodes((cur) => [...cur, ...rfClones]);
+      setDirty(true);
+      // Select the freshly-pasted nodes so next paste cascades correctly.
+      const pastedIds = clones.map((n) => n.id);
+      setSelectedNodeId(pastedIds[pastedIds.length - 1] ?? null);
+      setSelectedIds(pastedIds);
+    }
+    function clipboardCut(): void {
+      const ids = selectedIds.length > 0 ? selectedIds : (selectedNodeId ? [selectedNodeId] : []);
+      if (ids.length === 0) return;
+      clipboardCopy();
+      for (const id of ids) deleteNode(id);
     }
     function handler(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
@@ -210,11 +270,28 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       } else if ((key === 'z' && e.shiftKey) || key === 'y') {
         e.preventDefault();
         history.redo();
+      } else if (key === 'c') {
+        e.preventDefault();
+        clipboardCopy();
+      } else if (key === 'x') {
+        e.preventDefault();
+        clipboardCut();
+      } else if (key === 'v') {
+        e.preventDefault();
+        clipboardPaste();
+      } else if (key === 'd') {
+        // Duplicate — copy then paste in one shot, no clipboard mutation.
+        e.preventDefault();
+        const saved = clipboardRef.current;
+        clipboardCopy();
+        clipboardPaste(40, 40);
+        clipboardRef.current = saved;
       }
     }
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [history]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, selectedIds, selectedNodeId, apiNodes, nodes]);
 
   // Reset everything when scenario changes. Force-saves any pending edits to the
   // outgoing scenario before swapping so a debounce in flight doesn't lose data.
@@ -236,6 +313,7 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
     setLastSavedAt(null);
     setSelectedNodeId(null);
     setSelectedBranchKey(null);
+    setHistoricalRunId(null);
     runExec.reset();
     history.reset({
       apiNodes: scenario.nodes,
@@ -325,6 +403,12 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   useNodeStatusOverlay({
     run, breakpoints, groups, caseSets, startNodeIds, selectedBranchKey, setNodes, setEdges,
   });
+
+  // Note: an earlier iteration repositioned api nodes during a run to avoid response
+  // balloons overlapping. That trampled the user's manual layout, so the spread was
+  // removed — node positions stay exactly where the user put them, and the balloon
+  // alternation (right / left / right / left via balloonSide) is the only positioning
+  // hint we apply.
 
   const selectedApiNode = apiNodes.find((n) => n.id === selectedNodeId) ?? null;
 
@@ -416,7 +500,13 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
 
       // Seed the new ApiNode with declared params + first body sample/example.
       const seeded = seedFromEndpoint(id, ep);
+      // First node in an empty canvas → auto-mark as start so the engine's run-from-start
+      // path picks it up without the user toggling the right-click menu.
+      const isFirstApiNode = !apiNodes.some((n) => n.id !== id);
       setApiNodes((cur) => [...cur, seeded]);
+      if (isFirstApiNode) {
+        setStartNodeIds((cur) => (cur.includes(id) ? cur : [...cur, id]));
+      }
 
       setNodes((cur) => [
         ...cur,
@@ -443,7 +533,8 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       setDirty(true);
       setSelectedNodeId(id);
     },
-    [nodes, screenToFlowPosition, setNodes, setEdges]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodes, apiNodes, screenToFlowPosition, setNodes, setEdges, setApiNodes, setStartNodeIds]
   );
 
 
@@ -463,7 +554,9 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
   // earlier in the function body) reach the live dirtyTracking setters at call time.
   dirtyRefBridge.current = dirtyRef;
   saveRefBridge.current = onSaveRef.current;
-  dirtyBridge.current = setDirty;
+  // In historical view dirty-flag flips become no-ops so edits don't trigger autosave
+  // and the user can still browse without accidentally persisting changes.
+  dirtyBridge.current = historicalRunId ? (() => {}) : setDirty;
   savingBridge.current = setSaving;
   lastSavedAtBridge.current = setLastSavedAt;
   const nowTick = useVisibilityTicker(lastSavedAt != null);
@@ -509,31 +602,30 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
       {quickCallEp && (
         <QuickCallPanel endpoint={quickCallEp} onClose={() => setQuickCallEp(null)} />
       )}
-      <FlowHeader
-        name={flowName}
-        description={flowDescription}
-        tags={flowTags}
-        onNameChange={(v) => { setFlowName(v); setDirty(true); }}
-        onDescriptionChange={(v) => { setFlowDescription(v); setDirty(true); }}
-        onTagsChange={(v) => { setFlowTags(v); setDirty(true); }}
-      />
       {running && sseStatus === 'reconnecting' && (
         <div className="sse-reconnect-banner" role="status" aria-live="polite">
           Reconnecting to live run stream…
         </div>
       )}
+      {historicalRunId && (
+        <div className="history-banner" role="status" aria-live="polite">
+          <span className="history-banner-icon" aria-hidden="true">👁</span>
+          <span>Viewing run <code>{historicalRunId.slice(0, 8)}</code> · read-only</span>
+          <button
+            type="button"
+            className="history-banner-exit"
+            onClick={() => { setRun(null); setHistoricalRunId(null); }}
+          >✕ Exit history view</button>
+        </div>
+      )}
       <div className="canvas-toolbar">
-        <button className="btn primary" onClick={onStart} disabled={running || saving}>
+        <button
+          className="btn primary"
+          onClick={() => { setHistoricalRunId(null); void onStart(); }}
+          disabled={running || saving}
+        >
           {running ? '● running…' : '▶ Run'}
         </button>
-        <SaveStatus
-          dirty={dirty}
-          saving={saving}
-          err={err}
-          lastSavedAt={lastSavedAt}
-          nowTick={nowTick}
-          onForceSave={onSave}
-        />
         <button className="btn" onClick={onAutoLayout}>⌘ Layout</button>
         <button
           className="btn"
@@ -547,6 +639,17 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           disabled={!history.canRedo}
           title="Redo (⌘⇧Z)"
         >↷ Redo</button>
+        <TopnavSlot>
+          <SaveStatus
+            dirty={dirty}
+            saving={saving}
+            err={err}
+            lastSavedAt={lastSavedAt}
+            nowTick={nowTick}
+            onForceSave={onSave}
+          />
+          <RunHistoryToggle />
+        </TopnavSlot>
         {run && (
           <span className={`run-status status-${run.status}`}>
             run {run.id.slice(0, 8)} · {run.status}
@@ -650,6 +753,17 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           onClose={() => setBulkEditOpen(false)}
         />
       )}
+      {detailModalOpen && (
+        <ScenarioDetailModal
+          name={flowName}
+          description={flowDescription}
+          tags={flowTags}
+          onNameChange={(v) => { setFlowName(v); setDirty(true); }}
+          onDescriptionChange={(v) => { setFlowDescription(v); setDirty(true); }}
+          onTagsChange={(v) => { setFlowTags(v); setDirty(true); }}
+          onClose={() => setDetailModalOpen(false)}
+        />
+      )}
       <BranchDiagram
         run={run}
         nodes={apiNodes}
@@ -663,7 +777,6 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           setSelectedNodeId(id);
         }}
       />
-      <RunHistoryPanel scenarioId={scenario.id} refreshTick={historyTick} />
       <div className="canvas-row">
         <div
           className="canvas-flow"
@@ -700,11 +813,27 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
               }
               setSelectedNodeId(n.id);
             }}
+            onNodeDoubleClick={(_e, n) => {
+              // Double-click on the currently paused node = resume the breakpoint without
+              // opening the right-click menu. Only acts when the run is actually paused at
+              // this node, so accidental double-clicks elsewhere are no-ops.
+              if (isStructuralRf(n)) return;
+              const cloned = parseBranchCloneRf(n.id);
+              const canonicalId = cloned ? cloned.nodeId : n.id;
+              if (run?.status === 'paused' && run.pausedAtNodeId === canonicalId) {
+                void onResolveBreakpoint('resume');
+              }
+            }}
             onPaneClick={() => setSelectedNodeId(null)}
             onSelectionChange={({ nodes: sel }) => {
-              setSelectedIds(sel.filter(isApiRf).map((n) => n.id));
+              const nextIds = sel.filter(isApiRf).map((n) => n.id);
+              setSelectedIds((cur) => {
+                if (cur.length === nextIds.length && cur.every((id, i) => id === nextIds[i])) return cur;
+                return nextIds;
+              });
               const gnode = sel.find(isGroupRfNode);
-              setSelectedGroupId(gnode ? groupIdFromRf(gnode.id) : null);
+              const nextGid = gnode ? groupIdFromRf(gnode.id) : null;
+              setSelectedGroupId((cur) => (cur === nextGid ? cur : nextGid));
             }}
             onPaneContextMenu={contextMenus.paneHandler}
             onNodeContextMenu={contextMenus.nodeHandler}
@@ -712,7 +841,11 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
             fitView
             proOptions={{ hideAttribution: true }}
             deleteKeyCode={['Backspace', 'Delete']}
-            selectionKeyCode="Shift"
+            /* Hold any of these to drag a marquee selection instead of panning. */
+            selectionKeyCode={['Shift', 'Meta', 'Control']}
+            /* Multi-select on click stays bound to Shift only — Ctrl/Cmd would swallow
+               native keyboard shortcuts (copy/cut/etc) the user expects on the canvas. */
+            multiSelectionKeyCode="Shift"
           >
             <Background />
             <Controls showInteractive={false} />
@@ -748,6 +881,25 @@ function ScenarioCanvasInner({ scenario, endpointLookup, scenariosUsingEndpoint,
           }}
         />
       </div>
+      <RunHistoryDrawer
+        scenarioId={scenario.id}
+        refreshTick={historyTick}
+        activeRunId={historicalRunId}
+        activeRun={historicalRunId ? run : null}
+        onPickNode={(nodeId) => setSelectedNodeId(nodeId)}
+        onOpenDetail={() => setDetailModalOpen(true)}
+        onOpenRun={(historical) => {
+          // Drop any live SSE subscription so the historical load isn't clobbered by an
+          // in-flight event from a different run.
+          runExec.reset();
+          setRun(historical);
+          setHistoricalRunId(historical.id);
+          setSelectedBranchKey(null);
+          // Close the inspector — historical detail lives inline in the drawer, not in
+          // the right-side panel. Avoids two competing surfaces fighting for attention.
+          setSelectedNodeId(null);
+        }}
+      />
     </div>
   );
 }
@@ -759,6 +911,18 @@ interface SaveStatusProps {
   lastSavedAt: number | null;
   nowTick: number;
   onForceSave: () => void;
+}
+
+/** Portal mount that teleports children into App's #topnav-scenario-slot when present.
+ *  Falls back to inline rendering if the slot isn't on the page (smoke tests, etc.). */
+function TopnavSlot({ children }: { children: React.ReactNode }) {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = document.getElementById('topnav-scenario-slot');
+    setTarget(el);
+  }, []);
+  if (!target) return null;
+  return createPortal(children, target);
 }
 
 function SaveStatus({ dirty, saving, err, lastSavedAt, nowTick, onForceSave }: SaveStatusProps) {
@@ -791,6 +955,80 @@ function SaveStatus({ dirty, saving, err, lastSavedAt, nowTick, onForceSave }: S
     >
       <span className="save-status-dot" />{label}
     </button>
+  );
+}
+
+function RunHistoryToggle() {
+  const open = usePrefs((s) => s.runHistoryOpen);
+  const set = usePrefs((s) => s.set);
+  return (
+    <button
+      type="button"
+      className={`btn run-history-toggle${open ? ' is-on' : ''}`}
+      onClick={() => set('runHistoryOpen', !open)}
+      title="Toggle run history drawer"
+      aria-pressed={open}
+    >
+      <span className="run-history-toggle-switch" aria-hidden="true">
+        <span className="run-history-toggle-knob" />
+      </span>
+      <span>History</span>
+    </button>
+  );
+}
+
+interface RunHistoryDrawerProps {
+  scenarioId: string;
+  refreshTick: number;
+  onOpenRun?: (run: import('./api').Run) => void;
+  activeRunId?: string | null;
+  activeRun?: import('./api').Run | null;
+  onPickNode?: (nodeId: string) => void;
+  onOpenDetail?: () => void;
+}
+
+function RunHistoryDrawer({ scenarioId, refreshTick, onOpenRun, activeRunId, activeRun, onPickNode, onOpenDetail }: RunHistoryDrawerProps) {
+  const open = usePrefs((s) => s.runHistoryOpen);
+  const set = usePrefs((s) => s.set);
+  return createPortal(
+    <aside
+      className={`run-history-drawer${open ? ' is-open' : ''}`}
+      aria-hidden={!open}
+      aria-label="Run history"
+    >
+      <header className="run-history-drawer-head">
+        <span className="run-history-drawer-title">Run history</span>
+        <div className="run-history-drawer-actions">
+          {onOpenDetail && (
+            <button
+              type="button"
+              className="run-history-drawer-detail"
+              onClick={onOpenDetail}
+              title="Edit scenario name, description and tags"
+            >Detail</button>
+          )}
+          <button
+            type="button"
+            className="run-history-drawer-close"
+            onClick={() => set('runHistoryOpen', false)}
+            aria-label="Close history"
+          >×</button>
+        </div>
+      </header>
+      <div className="run-history-drawer-body">
+        {open && (
+          <RunHistoryPanel
+            scenarioId={scenarioId}
+            refreshTick={refreshTick}
+            onOpenRun={onOpenRun}
+            activeRunId={activeRunId}
+            activeRun={activeRun}
+            onPickNode={onPickNode}
+          />
+        )}
+      </div>
+    </aside>,
+    document.body,
   );
 }
 

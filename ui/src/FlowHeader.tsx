@@ -32,37 +32,19 @@ export function FlowHeader({
     onTagsChange(tags.filter((x) => x !== t));
   }
 
+  // Suppress unused-prop lints — name/tags still flow through for autosave bookkeeping
+  // even though they aren't rendered here (sidebar shows the name, tag editor removed).
+  void name;
+  void onNameChange;
+  void tags;
+  void onTagsChange;
+  void tagDraft;
+  void setTagDraft;
+  void commitTag;
+  void removeTag;
   return (
     <div className="flow-header">
       <div className="flow-header-row">
-        <input
-          className="flow-name"
-          value={name}
-          onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Untitled flow"
-          spellCheck={false}
-        />
-        <div className="flow-tags">
-          {tags.map((t) => (
-            <span key={t} className="flow-tag">
-              {t}
-              <button onClick={() => removeTag(t)} title="Remove tag">×</button>
-            </span>
-          ))}
-          <input
-            className="flow-tag-input"
-            value={tagDraft}
-            onChange={(e) => setTagDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitTag(); }
-              else if (e.key === 'Backspace' && tagDraft.length === 0 && tags.length > 0) {
-                onTagsChange(tags.slice(0, -1));
-              }
-            }}
-            onBlur={commitTag}
-            placeholder="+ tag"
-          />
-        </div>
         <button
           className="flow-desc-toggle"
           onClick={() => setDescOpen((v) => !v)}

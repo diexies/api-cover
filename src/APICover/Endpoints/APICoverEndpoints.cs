@@ -400,26 +400,31 @@ internal static class APICoverEndpoints
                 return;
             }
 
+            // Heartbeat: write a `:heartbeat\n\n` SSE comment line every 15s so idle proxies
+            // don't drop the connection. Runs in parallel with the event loop; a SemaphoreSlim
+            // serialises writes to Response.Body.
+            var writeLock = new SemaphoreSlim(1, 1);
+            using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            var heartbeatTask = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!heartbeatCts.Token.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(15), heartbeatCts.Token);
+                        await writeLock.WaitAsync(heartbeatCts.Token);
+                        try { await WriteHeartbeat(ctx); }
+                        finally { writeLock.Release(); }
+                    }
+                }
+                catch (OperationCanceledException) { /* expected on shutdown */ }
+                catch { /* client disconnected mid-write; main loop handles cleanup */ }
+            }, heartbeatCts.Token);
+
             try
             {
-                // Race the bus subscription against a 15s heartbeat ticker so the connection
-                // doesn't go quiet for long enough that intermediaries (proxies, load balancers)
-                // drop it as idle. Heartbeats are SSE comment lines (`:keepalive`) per spec —
-                // the browser EventSource ignores them but the bytes keep the channel alive.
-                var ct = ctx.RequestAborted;
-                await using var enumerator = bus.SubscribeAsync(id, ct).GetAsyncEnumerator(ct);
-                var nextTask = enumerator.MoveNextAsync().AsTask();
-                while (!ct.IsCancellationRequested)
+                await foreach (var evt in bus.SubscribeAsync(id, ctx.RequestAborted))
                 {
-                    var heartbeatTask = Task.Delay(TimeSpan.FromSeconds(15), ct);
-                    var winner = await Task.WhenAny(nextTask, heartbeatTask);
-                    if (winner == heartbeatTask)
-                    {
-                        await WriteHeartbeat(ctx);
-                        continue;
-                    }
-                    if (!nextTask.Result) break;
-                    var evt = enumerator.Current;
                     var name = evt.Type switch
                     {
                         RunEventType.RunStarted => "runStarted",
@@ -432,14 +437,20 @@ internal static class APICoverEndpoints
                         _ => "event"
                     };
                     var payload = JsonSerializer.Serialize(evt, Json);
-                    await WriteEvent(ctx, name, payload);
+                    await writeLock.WaitAsync(ctx.RequestAborted);
+                    try { await WriteEvent(ctx, name, payload); }
+                    finally { writeLock.Release(); }
                     if (evt.Type == RunEventType.RunFinished) break;
-                    nextTask = enumerator.MoveNextAsync().AsTask();
                 }
             }
             catch (OperationCanceledException)
             {
                 // Client disconnected.
+            }
+            finally
+            {
+                heartbeatCts.Cancel();
+                try { await heartbeatTask; } catch { /* swallow */ }
             }
         }
 

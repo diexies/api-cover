@@ -96,6 +96,7 @@ export function InspectorPanel({
         isStartNode={startNodeIds.includes(selectedApiNode.id)}
         groupsForNode={groups.filter((g) => g.nodeIds.includes(selectedApiNode.id))}
         iterations={aggregateNodeResult(run, selectedApiNode.id)?.iterations}
+        latestResult={aggregateNodeResult(run, selectedApiNode.id)}
         siblings={apiNodes.filter((n) => n.id !== selectedApiNode.id)}
         upstreamIds={edges.filter((e) => e.target === selectedApiNode.id).map((e) => e.source)}
         downstreamIds={edges.filter((e) => e.source === selectedApiNode.id).map((e) => e.target)}

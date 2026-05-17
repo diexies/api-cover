@@ -330,6 +330,9 @@ export function App() {
           </span>
         </div>
         <div className="topnav-tiles">
+          {/* Portal target — ScenarioCanvas mounts SaveStatus + History toggle here when
+              a scenario is open, so they sit alongside global workspace actions. */}
+          <div id="topnav-scenario-slot" className="topnav-scenario-slot" />
           <button
             type="button"
             className="topnav-tile is-icon tile-stats"
@@ -348,6 +351,16 @@ export function App() {
           >
             <span className="topnav-tile-icon" aria-hidden="true">⚙</span>
           </button>
+          {enableCallGraph && (
+            <button
+              type="button"
+              className={`topnav-system-map ${sidebar === 'inspector' ? 'is-active' : ''}`}
+              onClick={() => { setSelectedId(null); setSidebar('inspector'); }}
+              title="System Map"
+            >
+              <span className="topnav-system-map-text">System Map</span>
+            </button>
+          )}
         </div>
       </header>
       <div className={`layout${agentDocked ? ' is-agent-docked' : ''}${sidebar === 'inspector' ? ' is-fullbleed' : ''}`}>
@@ -358,12 +371,6 @@ export function App() {
               <div className="sidebar-head">
                 <h2>Business Flows</h2>
                 <NewScenarioControl onCreate={createScenario} existingIds={scenarios.map((s) => s.id)} onError={setError} />
-                {enableCallGraph && (
-                  <>
-                    <button className="settings-btn" title="System inspector" onClick={() => setSidebar('inspector')}>📡</button>
-                    <button className="settings-btn" title="Service catalog" onClick={() => setSidebar('services')}>⛁</button>
-                  </>
-                )}
               </div>
               <ScenarioList scenarios={scenarios} selectedId={selectedId} onSelect={setSelectedId} />
             </>
@@ -373,7 +380,6 @@ export function App() {
               <div className="sidebar-head back-row">
                 <button className="back-arrow" onClick={backToScenarios} title="Back to scenarios">←</button>
                 <span className="current-scenario">{selected.name}</span>
-                <button className="settings-btn" title="Global settings" onClick={() => setGlobalSettingsOpen(true)}>⚙</button>
               </div>
               <EndpointPalette onError={setError} />
             </>
