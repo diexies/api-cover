@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import type { AuthConfig, AuthType, ApiKeyLocation } from './auth';
 import { AgentSettingsTab } from './AgentSettingsTab';
 import type { AgentStatus } from './api';
+import { usePrefs } from './stores/prefs';
+import { Modal } from './components/Modal';
 
 interface Props {
   initialAuth: AuthConfig;
@@ -13,26 +15,17 @@ interface Props {
 
 type Tab = 'auth' | 'agent' | 'settings';
 
-const TAB_STORAGE_KEY = 'apicover.settingsTab';
-
-function readStoredTab(): Tab {
-  try {
-    const v = localStorage.getItem(TAB_STORAGE_KEY);
-    if (v === 'auth' || v === 'agent' || v === 'settings') return v;
-  } catch { /* ignore */ }
-  return 'auth';
-}
-
 /**
  * Workspace-level centred modal. Closing (backdrop click / Escape / explicit close button)
  * auto-persists the current auth state — there are no Save / Cancel buttons.
  *
- * Active tab is persisted to localStorage so the modal re-opens where the user left it.
- * Callers that want a specific tab on open should write the key before flipping the
- * modal open (App.openGlobalSettings does this).
+ * Active tab is persisted via the central prefs store so the modal re-opens where the user
+ * left it. Callers that want a specific tab on open write to prefs first
+ * (App.openGlobalSettings does this).
  */
 export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose, agentStatus, onAgentChanged }: Props) {
-  const [tab, setTab] = useState<Tab>(() => readStoredTab());
+  const tab = usePrefs((s) => s.settingsTab);
+  const setTab = (t: Tab) => usePrefs.getState().set('settingsTab', t);
   const [auth, setAuth] = useState<AuthConfig>(initialAuth);
 
   // Persist on every change so closing always reflects the latest state.
@@ -40,17 +33,6 @@ export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose, agentSta
     onSaveAuth(auth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth]);
-
-  // Persist the active tab so the modal re-opens where the user left it.
-  useEffect(() => {
-    try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch { /* quota */ }
-  }, [tab]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   function setType(type: AuthType) {
     if (type === 'bearer' && !auth.bearer) setAuth({ ...auth, type, bearer: { token: '' } });
@@ -60,18 +42,22 @@ export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose, agentSta
   }
 
   return (
-    <>
-      <div className="modal-backdrop blurred" onClick={onClose} />
-      <div className="modal-centered global-settings" role="dialog" aria-modal="true" aria-label="Global settings" onClick={(e) => e.stopPropagation()}>
-        <header className="gs-head">
-          <div className="gs-head-title">
-            <h3>Global Settings</h3>
-            <p className="gs-head-sub">workspace-wide preferences · auto-saves on change</p>
-          </div>
-          <button className="gs-close" onClick={onClose} aria-label="close">×</button>
-        </header>
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      size="lg"
+      className="global-settings"
+      labelledBy="global-settings-title"
+    >
+      <header className="gs-head">
+        <div className="gs-head-title">
+          <Modal.Title id="global-settings-title">Global Settings</Modal.Title>
+          <p className="gs-head-sub">workspace-wide preferences · auto-saves on change</p>
+        </div>
+        <Modal.Close />
+      </header>
 
-        <nav className="gs-tabs" role="tablist">
+      <nav className="gs-tabs" role="tablist">
           <button
             className={`gs-tab${tab === 'auth' ? ' is-active' : ''}`}
             onClick={() => setTab('auth')}
@@ -87,26 +73,25 @@ export function GlobalSettingsModal({ initialAuth, onSaveAuth, onClose, agentSta
             >AI Agent</button>
           )}
           <button
-            className={`gs-tab${tab === 'settings' ? ' is-active' : ''}`}
-            onClick={() => setTab('settings')}
-            role="tab"
-            aria-selected={tab === 'settings'}
-          >Workspace</button>
-        </nav>
+          className={`gs-tab${tab === 'settings' ? ' is-active' : ''}`}
+          onClick={() => setTab('settings')}
+          role="tab"
+          aria-selected={tab === 'settings'}
+        >Workspace</button>
+      </nav>
 
-        <div className="gs-pane">
-          {tab === 'auth' && <AuthPane auth={auth} setAuth={setAuth} setType={setType} />}
-          {tab === 'agent' && agentStatus && (
-            <AgentSettingsTab status={agentStatus} onChanged={onAgentChanged} />
-          )}
-          {tab === 'settings' && <WorkspacePane />}
-        </div>
-
-        <footer className="gs-foot">
-          changes auto-save · click outside or press <kbd>Esc</kbd> to close
-        </footer>
+      <div className="gs-pane">
+        {tab === 'auth' && <AuthPane auth={auth} setAuth={setAuth} setType={setType} />}
+        {tab === 'agent' && agentStatus && (
+          <AgentSettingsTab status={agentStatus} onChanged={onAgentChanged} />
+        )}
+        {tab === 'settings' && <WorkspacePane />}
       </div>
-    </>
+
+      <footer className="gs-foot">
+        changes auto-save · click outside or press <kbd>Esc</kbd> to close
+      </footer>
+    </Modal>
   );
 }
 

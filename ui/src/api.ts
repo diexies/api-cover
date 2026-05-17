@@ -56,6 +56,24 @@ export interface ApiNode {
   contentType?: string;
   shouldRun?: unknown;
   position?: { x: number; y: number };
+  streaming?: StreamingNodeOptions;
+}
+
+export type StreamingMode = 'Collect' | 'First' | 'Until';
+export type StreamParser = 'Auto' | 'Sse' | 'Ndjson' | 'Raw';
+
+export interface StreamingNodeOptions {
+  /** Termination strategy. */
+  mode?: StreamingMode;
+  /** Parser: Auto (by content-type), Sse, Ndjson, Raw. */
+  parser?: StreamParser;
+  /** JSONLogic predicate evaluated against `{message, index, elapsed}` per chunk;
+   *  Until mode advances when this becomes truthy. */
+  until?: unknown;
+  /** ISO 8601 duration string, e.g. "PT30S". */
+  timeout?: string;
+  /** Optional ceiling on number of messages. */
+  maxMessages?: number;
 }
 
 export interface Edge {
@@ -259,15 +277,44 @@ export interface ScenarioHistoryEntry {
 }
 
 export async function listScenarioHistory(scenarioId: string): Promise<ScenarioHistoryEntry[]> {
-  return apiJson<ScenarioHistoryEntry[]>(
+  const raw = await apiJson<ScenarioHistoryEntry[]>(
     `${apiBase}/scenarios/${encodeURIComponent(scenarioId)}/history`,
   );
+  // Older disk-persisted entries serialise status as a numeric enum; coerce to the
+  // string form the UI's CSS + comparisons expect.
+  const runMap = ['pending', 'running', 'succeeded', 'failed', 'cancelled', 'paused'];
+  return raw.map((e) => ({
+    ...e,
+    status: typeof (e as unknown as { status: unknown }).status === 'number'
+      ? (runMap[(e as unknown as { status: number }).status] ?? 'pending')
+      : e.status,
+  }));
 }
 
 export async function getScenarioHistoryRun(scenarioId: string, runId: string): Promise<Run> {
-  return apiJson<Run>(
+  const raw = await apiJson<Run>(
     `${apiBase}/scenarios/${encodeURIComponent(scenarioId)}/history/${encodeURIComponent(runId)}`,
   );
+  return normaliseRunStatuses(raw);
+}
+
+/** Older disk-persisted runs serialise NodeStatus as integers (0..6). Live SSE delivers
+ *  string enum values. Coerce to the string form so the UI doesn't have to branch. */
+function normaliseRunStatuses(run: Run): Run {
+  const nodeMap: NodeStatus[] = ['pending', 'running', 'paused', 'succeeded', 'failed', 'skipped', 'cancelled'];
+  const runMap: RunStatus[] = ['pending', 'running', 'succeeded', 'failed', 'cancelled', 'paused'];
+  return {
+    ...run,
+    status: typeof (run as unknown as { status: unknown }).status === 'number'
+      ? (runMap[(run as unknown as { status: number }).status] ?? 'pending')
+      : run.status,
+    nodeResults: run.nodeResults.map((nr) => ({
+      ...nr,
+      status: typeof (nr as unknown as { status: unknown }).status === 'number'
+        ? (nodeMap[(nr as unknown as { status: number }).status] ?? 'pending')
+        : nr.status,
+    })),
+  };
 }
 
 export interface GitCommit {
@@ -757,13 +804,26 @@ export interface RunEvent {
  * The server emits a synthetic "snapshot" event first carrying the current Run object so
  * late subscribers don't miss state.
  */
+import { openReconnectingEventSource, type SseStatus as SseStatusType } from './hooks/useEventSource';
+
+export type SseStatus = SseStatusType;
+
+export interface SubscribeRunEventsOptions {
+  onStatus?: (status: SseStatus) => void;
+  onError?: (e: Event) => void;
+}
+
 export function subscribeRunEvents(
   runId: string,
   onEvent: (evt: RunEvent) => void,
-  onError?: (e: Event) => void
+  optsOrError?: SubscribeRunEventsOptions | ((e: Event) => void),
 ): () => void {
+  // Accept both the legacy onError-fn shape and the new options object so existing callers
+  // (ScenarioCanvas) keep working without a same-PR caller refactor.
+  const opts: SubscribeRunEventsOptions = typeof optsOrError === 'function'
+    ? { onError: optsOrError }
+    : (optsOrError ?? {});
   const url = `${apiBase}/runs/${encodeURIComponent(runId)}/events`;
-  const es = new EventSource(url);
   const eventNames: RunEvent['type'][] = [
     'snapshot',
     'runStarted',
@@ -776,8 +836,11 @@ export function subscribeRunEvents(
     'branchSpawned',
     'branchCompleted',
   ];
-  for (const name of eventNames) {
-    es.addEventListener(name, (e: MessageEvent) => {
+  const handle = openReconnectingEventSource(url, {
+    events: eventNames,
+    onStatus: opts.onStatus,
+    onError: opts.onError,
+    onEvent: (name, e) => {
       try {
         const data = JSON.parse(e.data);
         if (name === 'snapshot') {
@@ -788,10 +851,9 @@ export function subscribeRunEvents(
       } catch (err) {
         console.error(`Failed to parse SSE ${name}:`, err);
       }
-    });
-  }
-  if (onError) es.onerror = onError;
-  return () => es.close();
+    },
+  });
+  return () => handle.close();
 }
 
 // ---------------------------------------------------------------------------

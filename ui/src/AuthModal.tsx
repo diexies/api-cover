@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { AuthConfig, AuthType, ApiKeyLocation } from './auth';
+import { Modal } from './components/Modal';
 
 interface Props {
   initial: AuthConfig;
@@ -8,19 +9,11 @@ interface Props {
 }
 
 /**
- * Slide-in-from-the-right modal that lets the user pick an auth strategy and provide
- * credentials. Pure form — persistence is the caller's responsibility (App owns the
- * localStorage round-trip via the auth module).
+ * Modal that lets the user pick an auth strategy and provide credentials. Pure form —
+ * persistence is the caller's responsibility (App owns the round-trip via the auth module).
  */
 export function AuthModal({ initial, onSave, onClose }: Props) {
   const [cfg, setCfg] = useState<AuthConfig>(initial);
-
-  // Close on Escape.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   function setType(type: AuthType) {
     if (type === 'bearer' && !cfg.bearer) setCfg({ ...cfg, type, bearer: { token: '' } });
@@ -30,13 +23,17 @@ export function AuthModal({ initial, onSave, onClose }: Props) {
   }
 
   return (
-    <>
-      <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Authorization">
-        <div className="modal-head">
-          <h3>Authorization</h3>
-          <button className="close-btn" onClick={onClose}>×</button>
-        </div>
+    <Modal
+      open
+      onOpenChange={(o) => { if (!o) onClose(); }}
+      size="md"
+      labelledBy="auth-modal-title"
+    >
+      <Modal.Header>
+        <Modal.Title id="auth-modal-title">Authorization</Modal.Title>
+        <Modal.Close />
+      </Modal.Header>
+      <Modal.Body>
         <p className="muted small">
           Credentials attach to every HTTP request the engine emits during a run. Stored locally in
           your browser; never persisted on the server.
@@ -140,13 +137,12 @@ export function AuthModal({ initial, onSave, onClose }: Props) {
         {cfg.type === 'none' && (
           <div className="muted">No credentials will be attached to runs.</div>
         )}
-
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={() => { onSave(cfg); onClose(); }}>Save</button>
-        </div>
-      </div>
-    </>
+      </Modal.Body>
+      <Modal.Footer>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn primary" onClick={() => { onSave(cfg); onClose(); }}>Save</button>
+      </Modal.Footer>
+    </Modal>
   );
 }
 

@@ -1,6 +1,7 @@
 import type { ApiNode, EndpointDescriptor } from '../api';
 import { DependencyGraphMini } from './DependencyGraphMini';
 import { TermGroup } from './TermGroup';
+import { JsonLogicHint } from '../components/JsonLogicHint';
 
 interface Props {
   node: ApiNode;
@@ -33,7 +34,10 @@ export function WiringTab({
         hint={isStartMode ? 'when does this node start?' : 'when does this node fire?'}
       >
         <label className="term-form-row">
-          <span className="term-form-label">JSONLogic predicate</span>
+          <span className="term-form-label-row">
+            <span className="term-form-label">JSONLogic predicate</span>
+            <JsonLogicHint ctx="default" triggerLabel="Show available variables and operators" />
+          </span>
           <textarea
             className="body-editor wiring-jsonlogic"
             rows={4}

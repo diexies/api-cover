@@ -400,6 +400,27 @@ internal static class APICoverEndpoints
                 return;
             }
 
+            // Heartbeat: write a `:heartbeat\n\n` SSE comment line every 15s so idle proxies
+            // don't drop the connection. Runs in parallel with the event loop; a SemaphoreSlim
+            // serialises writes to Response.Body.
+            var writeLock = new SemaphoreSlim(1, 1);
+            using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            var heartbeatTask = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!heartbeatCts.Token.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(15), heartbeatCts.Token);
+                        await writeLock.WaitAsync(heartbeatCts.Token);
+                        try { await WriteHeartbeat(ctx); }
+                        finally { writeLock.Release(); }
+                    }
+                }
+                catch (OperationCanceledException) { /* expected on shutdown */ }
+                catch { /* client disconnected mid-write; main loop handles cleanup */ }
+            }, heartbeatCts.Token);
+
             try
             {
                 await foreach (var evt in bus.SubscribeAsync(id, ctx.RequestAborted))
@@ -416,13 +437,20 @@ internal static class APICoverEndpoints
                         _ => "event"
                     };
                     var payload = JsonSerializer.Serialize(evt, Json);
-                    await WriteEvent(ctx, name, payload);
+                    await writeLock.WaitAsync(ctx.RequestAborted);
+                    try { await WriteEvent(ctx, name, payload); }
+                    finally { writeLock.Release(); }
                     if (evt.Type == RunEventType.RunFinished) break;
                 }
             }
             catch (OperationCanceledException)
             {
                 // Client disconnected.
+            }
+            finally
+            {
+                heartbeatCts.Cancel();
+                try { await heartbeatTask; } catch { /* swallow */ }
             }
         }
 
@@ -435,6 +463,14 @@ internal static class APICoverEndpoints
                 await ctx.Response.WriteAsync($"data: {line}\n");
             }
             await ctx.Response.WriteAsync("\n");
+            await ctx.Response.Body.FlushAsync();
+        }
+
+        static async Task WriteHeartbeat(HttpContext ctx)
+        {
+            // SSE comment line — recognised by spec, ignored by EventSource, keeps the
+            // connection alive across idle proxies.
+            await ctx.Response.WriteAsync(":heartbeat\n\n");
             await ctx.Response.Body.FlushAsync();
         }
 

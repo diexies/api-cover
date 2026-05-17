@@ -12,6 +12,7 @@ import { AgentMcpTab } from './AgentMcpTab';
 import { AgentMemoryTab } from './AgentMemoryTab';
 import { AgentSessionsList } from './AgentSessionsList';
 import { AgentTimeline } from './AgentTimeline';
+import { usePrefs } from './stores/prefs';
 
 interface Props {
   status: AgentStatus;
@@ -360,10 +361,8 @@ function barPct(spent: number | undefined, cap: number | undefined): number {
 /* ─── Model picker ─────────────────────────────────────────────────────
    Inline dropdown beside the agent header. The current backend doesn't
    expose a "switch model" endpoint, so the selection lives client-side
-   for now (localStorage) — the underlying CLI still runs whatever the
+   for now (prefs store) — the underlying CLI still runs whatever the
    host configured. Wire to a backend setter when available. */
-
-const MODEL_STORAGE_KEY = 'apicover.agent.model';
 
 interface ModelOption { id: string; label: string; provider: string }
 
@@ -378,9 +377,8 @@ const MODEL_CATALOG: ModelOption[] = [
 
 function ModelPicker({ currentModel }: { currentModel: string }) {
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<string>(() => {
-    try { return localStorage.getItem(MODEL_STORAGE_KEY) ?? currentModel; } catch { return currentModel; }
-  });
+  const storedModel = usePrefs((s) => s.agent.model);
+  const [selected, setSelected] = useState<string>(storedModel ?? currentModel);
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -399,7 +397,7 @@ function ModelPicker({ currentModel }: { currentModel: string }) {
 
   function pick(id: string) {
     setSelected(id);
-    try { localStorage.setItem(MODEL_STORAGE_KEY, id); } catch { /* quota */ }
+    usePrefs.getState().set('agent', { model: id });
     setOpen(false);
   }
 

@@ -27,6 +27,14 @@ const TAB_PRIMERS: Record<Exclude<InspectorTab, 'overview'>, { title: string; li
       'Discovery şeması varsa form modu otomatik gelir, yoksa raw JSON moduna geç.',
     ],
   },
+  response: {
+    title: '< response',
+    lines: [
+      'Son çalıştırma sonucu — bu node\'un dönen status, body ve header bilgisi.',
+      'Tarih seçildiyse o run\'ın geçmiş yanıtı gösterilir (history drawer\'dan tıkla).',
+      'Body JSON ise pretty-print + kopyalama; aksi halde ham metin.',
+    ],
+  },
   wiring: {
     title: '# wiring',
     lines: [

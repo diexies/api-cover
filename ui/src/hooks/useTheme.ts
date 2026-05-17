@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
+import { usePrefs } from '../stores/prefs';
 
 export type ThemeChoice = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
 
-const STORAGE_KEY = 'apicover.theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
 function readSystem(): ResolvedTheme {
@@ -11,22 +11,16 @@ function readSystem(): ResolvedTheme {
   return window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
 }
 
-function readStoredChoice(): ThemeChoice {
-  if (typeof window === 'undefined') return 'system';
-  const v = window.localStorage?.getItem(STORAGE_KEY);
-  if (v === 'light' || v === 'dark' || v === 'system') return v;
-  return 'system';
-}
-
 /**
- * Reactive theme hook. Persists user override to localStorage; falls back to system preference
- * via prefers-color-scheme and updates live when the OS preference flips.
+ * Reactive theme hook. Reads user override from the central prefs store; falls back to
+ * system preference via prefers-color-scheme and updates live when the OS preference flips.
  *
- * Side effect: writes <html data-theme="..."> so CSS rules can target either explicit theme or
- * legacy @media prefers-color-scheme (now we treat data-theme as the source of truth).
+ * Side effect: writes <html data-theme="..."> so CSS rules can target either explicit theme
+ * or legacy @media prefers-color-scheme (now we treat data-theme as the source of truth).
  */
 export function useTheme() {
-  const [choice, setChoiceState] = useState<ThemeChoice>(readStoredChoice);
+  const choice = usePrefs((s) => s.theme);
+  const setChoiceInStore = usePrefs((s) => s.set);
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(readSystem);
 
   useEffect(() => {
@@ -43,10 +37,7 @@ export function useTheme() {
     document.documentElement.setAttribute('data-theme', resolved);
   }, [resolved]);
 
-  const setChoice = (c: ThemeChoice) => {
-    setChoiceState(c);
-    try { window.localStorage?.setItem(STORAGE_KEY, c); } catch { /* storage disabled */ }
-  };
+  const setChoice = (c: ThemeChoice) => setChoiceInStore('theme', c);
 
   return { choice, setChoice, resolved };
 }

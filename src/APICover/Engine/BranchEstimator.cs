@@ -34,8 +34,13 @@ public static class BranchEstimator
         if (scenario.Nodes.Count == 0) return new EstimateResult(0, 0);
 
         // Map: node id → list of incoming sources, list of outgoing targets, anchor variant count.
-        var incoming = scenario.Nodes.ToDictionary(n => n.Id, _ => new List<string>());
-        var outgoing = scenario.Nodes.ToDictionary(n => n.Id, _ => new List<string>());
+        // Tolerate duplicate node ids that may have leaked into older saved scenarios — pick
+        // the first occurrence rather than throwing. The UI's nextNodeId() does the same
+        // collision suffixing for new nodes, but legacy persisted blobs may pre-date that.
+        var seen = new HashSet<string>();
+        var uniqueNodes = scenario.Nodes.Where(n => seen.Add(n.Id)).ToList();
+        var incoming = uniqueNodes.ToDictionary(n => n.Id, _ => new List<string>());
+        var outgoing = uniqueNodes.ToDictionary(n => n.Id, _ => new List<string>());
         foreach (var e in scenario.Edges)
         {
             // Guard both endpoints — drop edges that reference unknown ids (e.g. stale
@@ -57,9 +62,9 @@ public static class BranchEstimator
         }
 
         // Kahn's algorithm topo sort.
-        var inDegree = scenario.Nodes.ToDictionary(n => n.Id, n => incoming[n.Id].Count);
-        var queue = new Queue<string>(scenario.Nodes.Where(n => inDegree[n.Id] == 0).Select(n => n.Id));
-        var topo = new List<string>(scenario.Nodes.Count);
+        var inDegree = uniqueNodes.ToDictionary(n => n.Id, n => incoming[n.Id].Count);
+        var queue = new Queue<string>(uniqueNodes.Where(n => inDegree[n.Id] == 0).Select(n => n.Id));
+        var topo = new List<string>(uniqueNodes.Count);
         while (queue.Count > 0)
         {
             var id = queue.Dequeue();
@@ -69,15 +74,15 @@ public static class BranchEstimator
                 if (--inDegree[t] == 0) queue.Enqueue(t);
             }
         }
-        // If the graph has cycles, fall back to scenario.Nodes order — estimator is conservative.
-        if (topo.Count != scenario.Nodes.Count)
+        // If the graph has cycles, fall back to uniqueNodes order — estimator is conservative.
+        if (topo.Count != uniqueNodes.Count)
         {
             return new EstimateResult(int.MaxValue, int.MaxValue);
         }
 
         // Compute branch count per node.
         var branches = new Dictionary<string, long>();
-        foreach (var n in scenario.Nodes) branches[n.Id] = incoming[n.Id].Count == 0 ? 1L : 0L;
+        foreach (var n in uniqueNodes) branches[n.Id] = incoming[n.Id].Count == 0 ? 1L : 0L;
 
         long totalLeafInvocations = 0;
         foreach (var id in topo)

@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentStatus, EndpointDescriptor, Run, Scenario } from './api';
+import type {
+  AgentStatus, EndpointDescriptor, GitCommit, Run, RunStatus, Scenario, ServiceMap,
+} from './api';
+import { getGitLog, getServiceMap } from './api';
 import type { AuthConfig } from './auth';
 import { ChatComposer } from './home/ChatComposer';
 import { CapabilityChips } from './home/CapabilityChips';
 import { GitTimeline } from './home/GitTimeline';
-import { coverage } from './home/utils';
-
-const CHAT_DRAFT_KEY = 'apicover.chatDraft';
+import { coverage, relativeTime } from './home/utils';
+import { usePrefs } from './stores/prefs';
 
 type Section = 'home' | 'stats' | 'scenarios';
 
@@ -100,8 +102,6 @@ function HomeSection({
   const [mode, setMode] = useState<string | null>(null);
 
   // Persist composer draft so a refresh doesn't lose the half-typed thought.
-  // Wrap in try/catch because Safari Private Mode + some embedded contexts
-  // throw on localStorage writes once they hit quota.
   function handleDraftChange(v: string) {
     // If user typed `/word ` at the start and there's no mode yet, lift the
     // command into the chip so the textarea only shows the prompt body.
@@ -113,18 +113,18 @@ function HomeSection({
           setMode(word);
           const rest = v.slice(m[0].length);
           setDraft(rest);
-          try { localStorage.setItem(CHAT_DRAFT_KEY, rest); } catch { /* quota */ }
+          usePrefs.getState().set('chatDraft', rest);
           return;
         }
       }
     }
     setDraft(v);
-    try { localStorage.setItem(CHAT_DRAFT_KEY, v); } catch { /* quota / disabled */ }
+    usePrefs.getState().set('chatDraft', v);
   }
   function handleSubmit(text: string) {
     const t = text.trim();
     if (!t) return;
-    try { localStorage.removeItem(CHAT_DRAFT_KEY); } catch { /* same as above */ }
+    usePrefs.getState().set('chatDraft', '');
     setDraft('');
     const sent = mode;
     setMode(null);
@@ -242,7 +242,7 @@ function HomeSection({
 }
 
 function readDraft(): string {
-  try { return localStorage.getItem(CHAT_DRAFT_KEY) ?? ''; } catch { return ''; }
+  return usePrefs.getState().chatDraft;
 }
 
 /**
@@ -303,31 +303,574 @@ function FirstRunChecklist({
   );
 }
 
+const DAY_MS = 86_400_000;
+const WEEK_MS = 7 * DAY_MS;
+
+function durationMs(r: Run): number | null {
+  if (!r.startedAt || !r.completedAt) return null;
+  const a = new Date(r.startedAt).getTime();
+  const b = new Date(r.completedAt).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return null;
+  return b - a;
+}
+
+function fmtMs(ms: number | null): string {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${(ms / 60_000).toFixed(1)} m`;
+}
+
 function StatsSection({ onBack, endpoints, scenarios, runs }: {
   onBack: () => void;
   endpoints: EndpointDescriptor[]; scenarios: Scenario[]; runs: Run[];
 }) {
-  const { covered, uncovered, pct } = useMemo(() => coverage(endpoints, scenarios), [endpoints, scenarios]);
-  const now = Date.now();
-  const dayMs = 86_400_000;
-  const today = runs.filter((r) => r.startedAt && now - new Date(r.startedAt).getTime() < dayMs).length;
-  const succeeded = runs.filter((r) => r.status === 'succeeded').length;
-  const failed = runs.filter((r) => r.status === 'failed').length;
+  const cov = useMemo(() => coverage(endpoints, scenarios), [endpoints, scenarios]);
+
+  const runsSorted = useMemo(
+    () => [...runs].sort((a, b) => {
+      const ta = a.startedAt ? new Date(a.startedAt).getTime() : -Infinity;
+      const tb = b.startedAt ? new Date(b.startedAt).getTime() : -Infinity;
+      return tb - ta;
+    }),
+    [runs],
+  );
+
+  const runsByScenario = useMemo(() => {
+    const m = new Map<string, Run[]>();
+    for (const r of runsSorted) {
+      const arr = m.get(r.scenarioId);
+      if (arr) arr.push(r); else m.set(r.scenarioId, [r]);
+    }
+    return m;
+  }, [runsSorted]);
+
+  const aggregates = useMemo(() => {
+    const now = Date.now();
+    let succeeded = 0, failed = 0, today = 0, thisWeek = 0;
+    const durations: number[] = [];
+    for (const r of runs) {
+      if (r.status === 'succeeded') succeeded++;
+      else if (r.status === 'failed') failed++;
+      if (r.startedAt) {
+        const t = new Date(r.startedAt).getTime();
+        if (!Number.isNaN(t)) {
+          if (now - t < DAY_MS) today++;
+          if (now - t < WEEK_MS) thisWeek++;
+        }
+      }
+      const d = durationMs(r);
+      if (d != null) durations.push(d);
+    }
+    const avgDuration = durations.length === 0
+      ? null
+      : Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+    const avgNodes = scenarios.length === 0
+      ? 0
+      : Math.round(scenarios.reduce((sum, s) => sum + s.nodes.length, 0) / scenarios.length);
+    return { succeeded, failed, today, thisWeek, avgDuration, avgNodes };
+  }, [runs, scenarios]);
+
+  const methodBuckets = useMemo(() => {
+    const order = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+    const counts: Record<string, number> = { GET: 0, POST: 0, PUT: 0, PATCH: 0, DELETE: 0, OTHER: 0 };
+    for (const ep of endpoints) {
+      const m = (ep.method || '').toUpperCase();
+      if (order.includes(m)) counts[m]++;
+      else counts.OTHER++;
+    }
+    const total = endpoints.length || 1;
+    return [...order, 'OTHER'].map((m) => ({
+      method: m,
+      count: counts[m],
+      pct: Math.round((counts[m] / total) * 100),
+    }));
+  }, [endpoints]);
+
+  const areaRows = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const ep of endpoints) {
+      const key = ep.area?.trim() || 'uncategorised';
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    const max = Math.max(1, ...m.values());
+    return [...m.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([area, count]) => ({ area, count, pct: Math.round((count / max) * 100) }));
+  }, [endpoints]);
+
+  const deprecated = useMemo(() => endpoints.filter((e) => e.isDeprecated), [endpoints]);
+  const uncategorised = useMemo(
+    () => endpoints.filter((e) => !e.area && !e.purpose),
+    [endpoints],
+  );
+
+  const templates = useMemo(() => {
+    return scenarios
+      .map((s) => {
+        const rs = runsByScenario.get(s.id) ?? [];
+        const last = rs[0];
+        const ok = rs.filter((r) => r.status === 'succeeded').length;
+        const recent = rs.slice(0, 10).map((r) => r.status);
+        return {
+          scenario: s,
+          runCount: rs.length,
+          successRate: rs.length === 0 ? null : Math.round((ok / rs.length) * 100),
+          lastRun: last ?? null,
+          recentStatuses: recent,
+        };
+      })
+      .sort((a, b) => {
+        const ta = a.lastRun?.startedAt ? new Date(a.lastRun.startedAt).getTime() : -Infinity;
+        const tb = b.lastRun?.startedAt ? new Date(b.lastRun.startedAt).getTime() : -Infinity;
+        return tb - ta;
+      });
+  }, [scenarios, runsByScenario]);
+
+  const activity = useMemo(() => runsSorted.slice(0, 30), [runsSorted]);
+
+  const scenarioName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of scenarios) m.set(s.id, s.name);
+    return m;
+  }, [scenarios]);
+
+  const subTotals = useMemo(() => {
+    const samples = endpoints.reduce((acc, e) => acc + (e.samples?.length ?? 0), 0);
+    const params = endpoints.reduce((acc, e) => acc + (e.parameters?.length ?? 0), 0);
+    const responses = endpoints.reduce((acc, e) => acc + (e.responses?.length ?? 0), 0);
+    let mutations = 0, breakpoints = 0, caseVariants = 0, groupsCount = 0, edgesCount = 0;
+    for (const s of scenarios) {
+      groupsCount += s.groups?.length ?? 0;
+      edgesCount += s.edges?.length ?? 0;
+      breakpoints += s.breakpoints?.length ?? 0;
+      for (const g of s.groups ?? []) mutations += g.mutations?.length ?? 0;
+      for (const c of s.caseSets ?? []) caseVariants += c.variants.length;
+    }
+    return { samples, params, responses, mutations, breakpoints, caseVariants, groupsCount, edgesCount };
+  }, [endpoints, scenarios]);
 
   return (
-    <>
+    <div className="stats-page">
       <SectionHead title="Statistics" onBack={onBack} />
-      <div className="kpi-row">
+
+      <KpiGrid endpoints={endpoints} scenarios={scenarios} runs={runs} coverage={cov} aggregates={aggregates} deprecatedCount={deprecated.length} />
+
+      <MethodBreakdown buckets={methodBuckets} />
+
+      <AreaHistogram rows={areaRows} />
+
+      <DeprecatedAndUncategorised deprecated={deprecated} uncategorised={uncategorised} />
+
+      <TemplateGrid templates={templates} />
+
+      <ActivityTimeline runs={activity} aggregates={aggregates} totalRuns={runs.length} scenarioName={scenarioName} />
+
+      <SystemTopology />
+
+      <RecentCommits />
+
+      <SubTotalsFooter subTotals={subTotals} scenarios={scenarios.length} endpoints={endpoints.length} />
+    </div>
+  );
+}
+
+function StatsBlock({ title, hint, children, className }: {
+  title: string; hint?: string; children: React.ReactNode; className?: string;
+}) {
+  return (
+    <section className={`stats-block ${className ?? ''}`}>
+      <header className="stats-block-head">
+        <h3>{title}</h3>
+        {hint && <span className="stats-block-hint">{hint}</span>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function KpiGrid({ endpoints, scenarios, runs, coverage: cov, aggregates, deprecatedCount }: {
+  endpoints: EndpointDescriptor[]; scenarios: Scenario[]; runs: Run[];
+  coverage: { covered: number; uncovered: number; pct: number };
+  aggregates: { succeeded: number; failed: number; today: number; thisWeek: number; avgDuration: number | null; avgNodes: number };
+  deprecatedCount: number;
+}) {
+  const covTone: 'good' | 'warn' | 'bad' = cov.pct >= 70 ? 'good' : cov.pct >= 30 ? 'warn' : 'bad';
+  return (
+    <StatsBlock title="Headline" hint="Workspace at a glance">
+      <div className="kpi-grid-wide">
         <Kpi label="APIs" value={endpoints.length} />
         <Kpi label="Scenarios" value={scenarios.length} />
-        <Kpi label="Runs total" value={runs.length} hint={`${today} today`} />
-        <Kpi label="Coverage" value={`${pct}%`} hint={`${covered} / ${endpoints.length}`} tone={pct >= 70 ? 'good' : pct >= 30 ? 'warn' : 'bad'} />
-        <Kpi label="Untested" value={uncovered} tone={uncovered === 0 ? 'good' : 'warn'} />
-        <Kpi label="Succeeded" value={succeeded} tone="good" />
-        <Kpi label="Failed" value={failed} tone={failed === 0 ? 'default' : 'bad'} />
+        <Kpi label="Runs total" value={runs.length} />
+        <Kpi label="Coverage" value={`${cov.pct}%`} hint={`${cov.covered}/${endpoints.length}`} tone={covTone} />
+        <Kpi label="Covered" value={cov.covered} tone="good" />
+        <Kpi label="Untested" value={cov.uncovered} tone={cov.uncovered === 0 ? 'good' : 'warn'} />
+        <Kpi label="Succeeded" value={aggregates.succeeded} tone="good" />
+        <Kpi label="Failed" value={aggregates.failed} tone={aggregates.failed === 0 ? 'default' : 'bad'} />
+        <Kpi label="Runs today" value={aggregates.today} hint={`${aggregates.thisWeek} this week`} />
+        <Kpi label="Avg duration" value={fmtMs(aggregates.avgDuration)} />
+        <Kpi label="Avg nodes / scn" value={aggregates.avgNodes} />
+        <Kpi label="Deprecated" value={deprecatedCount} tone={deprecatedCount === 0 ? 'default' : 'warn'} />
       </div>
-    </>
+    </StatsBlock>
   );
+}
+
+function MethodBreakdown({ buckets }: { buckets: { method: string; count: number; pct: number }[] }) {
+  return (
+    <StatsBlock title="HTTP methods" hint="Endpoint count per verb">
+      <div className="method-tile-grid">
+        {buckets.map((b) => (
+          <div key={b.method} className={`method-tile method-${b.method.toLowerCase()}`}>
+            <div className="method-tile-head">
+              <span className={`method-badge mb-${b.method.toLowerCase()}`}>{b.method}</span>
+              <span className="method-tile-count">{b.count}</span>
+            </div>
+            <MiniBar pct={b.pct} variant={b.method.toLowerCase()} />
+            <div className="method-tile-pct">{b.pct}%</div>
+          </div>
+        ))}
+      </div>
+    </StatsBlock>
+  );
+}
+
+function AreaHistogram({ rows }: { rows: { area: string; count: number; pct: number }[] }) {
+  return (
+    <StatsBlock title="Endpoints by area" hint={`${rows.length} ${rows.length === 1 ? 'area' : 'areas'}`}>
+      {rows.length === 0 ? (
+        <div className="stats-empty">no endpoints discovered</div>
+      ) : (
+        <div className="area-histogram">
+          {rows.map((r) => (
+            <div key={r.area} className="area-histogram-row">
+              <div className="area-name">{r.area}</div>
+              <div className="area-bar"><div className="area-bar-fill" style={{ width: `${r.pct}%` }} /></div>
+              <div className="area-count">{r.count}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </StatsBlock>
+  );
+}
+
+function DeprecatedAndUncategorised({ deprecated, uncategorised }: {
+  deprecated: EndpointDescriptor[]; uncategorised: EndpointDescriptor[];
+}) {
+  return (
+    <div className="stats-flag-grid">
+      <StatsBlock title="Deprecated" hint={`${deprecated.length} flagged`} className="deprecated-block">
+        {deprecated.length === 0 ? (
+          <div className="stats-empty">nothing deprecated — clean slate</div>
+        ) : (
+          <ul className="flagged-list">
+            {deprecated.map((ep) => (
+              <li key={ep.id} className="flagged-row">
+                <span className={`method-badge mb-${(ep.method || '').toLowerCase()}`}>{ep.method}</span>
+                <span className="flagged-path">{ep.path}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </StatsBlock>
+      <StatsBlock title="Uncategorised" hint={`${uncategorised.length} need area or purpose`} className="uncategorised-block">
+        {uncategorised.length === 0 ? (
+          <div className="stats-empty">every endpoint has an area or purpose</div>
+        ) : (
+          <ul className="flagged-list">
+            {uncategorised.map((ep) => (
+              <li key={ep.id} className="flagged-row">
+                <span className={`method-badge mb-${(ep.method || '').toLowerCase()}`}>{ep.method}</span>
+                <span className="flagged-path">{ep.path}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </StatsBlock>
+    </div>
+  );
+}
+
+function TemplateGrid({ templates }: {
+  templates: {
+    scenario: Scenario;
+    runCount: number;
+    successRate: number | null;
+    lastRun: Run | null;
+    recentStatuses: RunStatus[];
+  }[];
+}) {
+  return (
+    <StatsBlock title="Scenario templates" hint={`${templates.length} total · sorted by last run`}>
+      {templates.length === 0 ? (
+        <div className="stats-empty">no scenarios yet</div>
+      ) : (
+        <div className="template-grid">
+          {templates.map(({ scenario: s, runCount, successRate, lastRun, recentStatuses }) => (
+            <article key={s.id} className="template-card-v2">
+              <header className="template-card-head">
+                <div className="template-card-name">{s.name}</div>
+                {lastRun ? <StatusPill status={lastRun.status} /> : <span className="status-pill status-pending">never run</span>}
+              </header>
+              {s.description && <div className="template-card-desc">{s.description}</div>}
+              {(s.tags && s.tags.length > 0) && (
+                <div className="template-card-tags">
+                  {s.tags.map((t) => <span key={t} className="tag-chip">{t}</span>)}
+                </div>
+              )}
+              <div className="template-meta-grid">
+                <div><span className="muted">nodes</span><b>{s.nodes.length}</b></div>
+                <div><span className="muted">edges</span><b>{s.edges?.length ?? 0}</b></div>
+                <div><span className="muted">groups</span><b>{s.groups?.length ?? 0}</b></div>
+                <div><span className="muted">cases</span><b>{s.caseSets?.length ?? 0}</b></div>
+                <div><span className="muted">runs</span><b>{runCount}</b></div>
+                <div>
+                  <span className="muted">success</span>
+                  <b>{successRate == null ? '—' : `${successRate}%`}</b>
+                </div>
+              </div>
+              <div className="template-card-foot">
+                <DotStrip statuses={recentStatuses} />
+                <span className="muted small">{lastRun ? relativeTime(lastRun.startedAt) : 'no history'}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </StatsBlock>
+  );
+}
+
+function ActivityTimeline({ runs, aggregates, totalRuns, scenarioName }: {
+  runs: Run[];
+  aggregates: { succeeded: number; failed: number; today: number; thisWeek: number };
+  totalRuns: number;
+  scenarioName: Map<string, string>;
+}) {
+  return (
+    <StatsBlock title="Recent run activity" hint={`last ${runs.length} of ${totalRuns}`}>
+      <div className="activity-aggregate-strip">
+        <span><b>{aggregates.today}</b> today</span>
+        <span><b>{aggregates.thisWeek}</b> this week</span>
+        <span><b>{aggregates.succeeded}</b> succeeded</span>
+        <span><b>{aggregates.failed}</b> failed</span>
+      </div>
+      {runs.length === 0 ? (
+        <div className="stats-empty">no runs recorded yet</div>
+      ) : (
+        <ul className="activity-list">
+          {runs.map((r) => (
+            <li key={r.id} className="activity-row">
+              <span className="activity-scenario">{scenarioName.get(r.scenarioId) ?? r.scenarioId}</span>
+              <StatusPill status={r.status} />
+              <span className="activity-time">{relativeTime(r.startedAt)}</span>
+              <span className="activity-duration">{fmtMs(durationMs(r))}</span>
+              <span className="activity-error" title={r.error ?? ''}>{r.error ?? ''}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </StatsBlock>
+  );
+}
+
+function SystemTopology() {
+  const [state, setState] = useState<{ status: 'loading' | 'ready' | 'empty' | 'error'; map: ServiceMap | null; error?: string }>(
+    { status: 'loading', map: null },
+  );
+  useEffect(() => {
+    let abort = false;
+    getServiceMap().then((m) => {
+      if (abort) return;
+      if (!m) { setState({ status: 'empty', map: null }); return; }
+      setState({ status: 'ready', map: m });
+    }).catch((e) => {
+      if (abort) return;
+      setState({ status: 'error', map: null, error: String(e?.message ?? e) });
+    });
+    return () => { abort = true; };
+  }, []);
+
+  const summary = useMemo(() => {
+    if (!state.map) return null;
+    const kinds: Record<string, number> = { endpoint: 0, service: 0, externalHttp: 0, database: 0 };
+    let depthSum = 0, depthCount = 0;
+    for (const n of state.map.nodes) {
+      kinds[n.kind] = (kinds[n.kind] ?? 0) + 1;
+      if (typeof n.metrics?.depth === 'number') { depthSum += n.metrics.depth; depthCount++; }
+    }
+    const total = state.map.nodes.length || 1;
+    const kindRows = Object.entries(kinds).map(([k, v]) => ({
+      kind: k, count: v, pct: Math.round((v / total) * 100),
+    }));
+    const nodes = state.map.nodes;
+    const topFanIn = [...nodes].sort((a, b) => b.metrics.fanIn - a.metrics.fanIn).slice(0, 5);
+    const topFanOut = [...nodes].sort((a, b) => b.metrics.fanOut - a.metrics.fanOut).slice(0, 5);
+    const islands = state.map.islands ?? [];
+    const biggestIsland = islands.reduce((m, i) => Math.max(m, i.length), 0);
+    const avgDepth = depthCount === 0 ? 0 : (depthSum / depthCount).toFixed(1);
+    return {
+      kindRows, topFanIn, topFanOut,
+      edges: state.map.edges.length,
+      islands: islands.length,
+      biggestIsland,
+      avgDepth,
+    };
+  }, [state.map]);
+
+  return (
+    <StatsBlock title="Service topology" hint="Call-graph aggregates">
+      {state.status === 'loading' && <div className="stats-empty">loading…</div>}
+      {state.status === 'error' && <div className="stats-empty stats-error">unavailable — {state.error}</div>}
+      {state.status === 'empty' && <div className="stats-empty">service map disabled — enable call-graph in inspector options</div>}
+      {state.status === 'ready' && summary && (
+        <div className="topology-grid">
+          <div className="topology-kind-strip">
+            {summary.kindRows.map((k) => (
+              <div key={k.kind} className="topology-kind-tile">
+                <div className="topology-kind-label">{k.kind}</div>
+                <div className="topology-kind-count">{k.count}</div>
+                <MiniBar pct={k.pct} />
+                <div className="topology-kind-pct">{k.pct}%</div>
+              </div>
+            ))}
+          </div>
+          <div className="topology-rank-grid">
+            <div className="topology-rank-table">
+              <div className="topology-rank-head">Top fan-in</div>
+              {summary.topFanIn.length === 0 ? <div className="muted small">none</div> : summary.topFanIn.map((n) => (
+                <div key={`fi-${n.id}`} className="topology-rank-row">
+                  <span className="topology-rank-name" title={n.fullName ?? n.label}>{n.label}</span>
+                  <span className="topology-rank-num">{n.metrics.fanIn}</span>
+                </div>
+              ))}
+            </div>
+            <div className="topology-rank-table">
+              <div className="topology-rank-head">Top fan-out</div>
+              {summary.topFanOut.length === 0 ? <div className="muted small">none</div> : summary.topFanOut.map((n) => (
+                <div key={`fo-${n.id}`} className="topology-rank-row">
+                  <span className="topology-rank-name" title={n.fullName ?? n.label}>{n.label}</span>
+                  <span className="topology-rank-num">{n.metrics.fanOut}</span>
+                </div>
+              ))}
+            </div>
+            <div className="topology-summary-tile">
+              <div><span className="muted">edges</span><b>{summary.edges}</b></div>
+              <div><span className="muted">islands</span><b>{summary.islands}</b></div>
+              <div><span className="muted">biggest island</span><b>{summary.biggestIsland}</b></div>
+              <div><span className="muted">avg depth</span><b>{summary.avgDepth}</b></div>
+            </div>
+          </div>
+        </div>
+      )}
+    </StatsBlock>
+  );
+}
+
+function RecentCommits() {
+  const [state, setState] = useState<{ status: 'loading' | 'ready' | 'error' | 'empty'; commits: GitCommit[]; error?: string }>(
+    { status: 'loading', commits: [] },
+  );
+  useEffect(() => {
+    let abort = false;
+    getGitLog(10).then((res) => {
+      if (abort) return;
+      if (!res.commits || res.commits.length === 0) { setState({ status: 'empty', commits: [] }); return; }
+      setState({ status: 'ready', commits: res.commits });
+    }).catch((e) => {
+      if (abort) return;
+      setState({ status: 'error', commits: [], error: String(e?.message ?? e) });
+    });
+    return () => { abort = true; };
+  }, []);
+
+  return (
+    <StatsBlock title="Recent commits" hint="Last 10 from local git">
+      {state.status === 'loading' && <div className="stats-empty">loading…</div>}
+      {state.status === 'error' && <div className="stats-empty stats-error">unavailable — {state.error}</div>}
+      {state.status === 'empty' && <div className="stats-empty">no commits available</div>}
+      {state.status === 'ready' && (
+        <ul className="commits-strip">
+          {state.commits.map((c) => (
+            <li key={c.sha} className="commits-row">
+              <span className="commits-sha">{c.shortSha}</span>
+              <span className="commits-subject" title={c.subject}>{c.subject}</span>
+              <span className="commits-author">{c.author}</span>
+              <span className="commits-time">{relativeTime(c.date)}</span>
+              {c.traced && <span className="commits-traced" title="touched scenario files">●</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </StatsBlock>
+  );
+}
+
+function SubTotalsFooter({ subTotals, scenarios, endpoints }: {
+  subTotals: {
+    samples: number; params: number; responses: number;
+    mutations: number; breakpoints: number; caseVariants: number;
+    groupsCount: number; edgesCount: number;
+  };
+  scenarios: number; endpoints: number;
+}) {
+  const tiles: { label: string; value: number }[] = [
+    { label: 'endpoints', value: endpoints },
+    { label: 'scenarios', value: scenarios },
+    { label: 'samples', value: subTotals.samples },
+    { label: 'parameters', value: subTotals.params },
+    { label: 'response shapes', value: subTotals.responses },
+    { label: 'edges', value: subTotals.edgesCount },
+    { label: 'groups', value: subTotals.groupsCount },
+    { label: 'mutations', value: subTotals.mutations },
+    { label: 'breakpoints', value: subTotals.breakpoints },
+    { label: 'case variants', value: subTotals.caseVariants },
+  ];
+  return (
+    <StatsBlock title="Granular totals" hint="Every counted thing in the workspace">
+      <div className="sub-totals-strip">
+        {tiles.map((t) => (
+          <div key={t.label} className="sub-total-tile">
+            <div className="sub-total-value">{t.value}</div>
+            <div className="sub-total-label">{t.label}</div>
+          </div>
+        ))}
+      </div>
+    </StatsBlock>
+  );
+}
+
+function MiniBar({ pct, variant }: { pct: number; variant?: string }) {
+  return (
+    <div className={`mini-bar ${variant ? `mini-bar-${variant}` : ''}`}>
+      <div className="mini-bar-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+    </div>
+  );
+}
+
+function DotStrip({ statuses }: { statuses: RunStatus[] }) {
+  if (statuses.length === 0) {
+    return <span className="dot-strip empty">no recent runs</span>;
+  }
+  return (
+    <span className="dot-strip" aria-label={`last ${statuses.length} run statuses`}>
+      {statuses.map((s, i) => (
+        <span key={i} className={`dot-strip-circle dot-${dotTone(s)}`} title={s} />
+      ))}
+    </span>
+  );
+}
+
+function dotTone(s: RunStatus): 'ok' | 'bad' | 'warn' | 'muted' {
+  if (s === 'succeeded') return 'ok';
+  if (s === 'failed') return 'bad';
+  if (s === 'running' || s === 'paused') return 'warn';
+  return 'muted';
+}
+
+function StatusPill({ status }: { status: RunStatus }) {
+  return <span className={`status-pill status-${status}`}>{status}</span>;
 }
 
 function ScenariosSection({ onBack, scenarios, runs }: {

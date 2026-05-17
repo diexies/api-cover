@@ -1,18 +1,43 @@
 import type { ApiNode, CaseSet, CaseVariant, ExecutionGroup, NodeFieldOverride } from '../api';
 import { BranchSimulator } from './BranchSimulator';
+import { JsonLogicHint } from '../components/JsonLogicHint';
 
 interface Props {
   node: ApiNode;
   groupsForNode: ExecutionGroup[];
+  /** All scenario groups — needed for the "add to group" picker. */
+  allGroups?: ExecutionGroup[];
   onEditGroup: (groupId: string) => void;
+  /** Mutate a single group (used by add/remove membership). */
+  onUpdateGroup?: (next: ExecutionGroup) => void;
+  /** Drop the group entirely when removing the last member. */
+  onDeleteGroup?: (groupId: string) => void;
   caseSet?: CaseSet;
   onCaseSetChange?: (next: CaseSet | null) => void;
 }
 
-export function BranchingTab({ node, groupsForNode, onEditGroup, caseSet, onCaseSetChange }: Props) {
+export function BranchingTab({ node, groupsForNode, allGroups, onEditGroup, onUpdateGroup, onDeleteGroup, caseSet, onCaseSetChange }: Props) {
   const inAnyGroup = groupsForNode.length > 0;
   const hasCases = !!caseSet && caseSet.variants.length > 0;
   const cartesian = groupsForNode.reduce((a, g) => a * Math.max(1, g.repeat?.count ?? 1), 1);
+  // Groups this node could be added to — drives the picker below the membership list.
+  const candidateGroups = (allGroups ?? []).filter((g) => !g.nodeIds.includes(node.id));
+
+  function removeFromGroup(g: ExecutionGroup) {
+    if (!onUpdateGroup || !onDeleteGroup) return;
+    const nextNodes = g.nodeIds.filter((x) => x !== node.id);
+    if (nextNodes.length === 0) onDeleteGroup(g.id);
+    else onUpdateGroup({
+      ...g,
+      nodeIds: nextNodes,
+      mutations: g.mutations?.filter((m) => m.nodeId !== node.id),
+    });
+  }
+
+  function addToGroup(g: ExecutionGroup) {
+    if (!onUpdateGroup) return;
+    onUpdateGroup({ ...g, nodeIds: [...g.nodeIds, node.id] });
+  }
 
   function addCaseSet() {
     if (!onCaseSetChange) return;
@@ -94,6 +119,9 @@ export function BranchingTab({ node, groupsForNode, onEditGroup, caseSet, onCase
                   <span className="muted small">{` · ${g.mutations!.filter((m) => m.nodeId === node.id).length} mutation${g.mutations!.filter((m) => m.nodeId === node.id).length === 1 ? '' : 's'}`}</span>
                 )}
                 <button className="term-action" onClick={() => onEditGroup(g.id)}>[edit mutations]</button>
+                {onUpdateGroup && onDeleteGroup && (
+                  <button className="term-action danger" onClick={() => removeFromGroup(g)}>[remove]</button>
+                )}
               </li>
             ))}
           </ul>
@@ -108,6 +136,23 @@ export function BranchingTab({ node, groupsForNode, onEditGroup, caseSet, onCase
           <div className="muted small">
             {`> drop this api inside a group rectangle on the canvas to multiply it across iterations.`}
           </div>
+        </div>
+      )}
+
+      {/* Explicit "add to group" picker — bypasses geometric membership. */}
+      {onUpdateGroup && candidateGroups.length > 0 && (
+        <div className="group-picker">
+          <div className="term-heading term-heading-comment">{`# add to group`}</div>
+          <ul className="group-list">
+            {candidateGroups.map((g) => (
+              <li key={g.id}>
+                <span className="group-chip" style={{ background: g.backgroundColor ?? '#a855f7' }} />
+                <code>{g.label ?? g.id}</code>
+                <span className="muted small">×{g.repeat?.count ?? 1}{g.repeat?.delay ? ` · ${g.repeat.delay}` : ''}</span>
+                <button className="term-action" onClick={() => addToGroup(g)}>[add]</button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -131,6 +176,7 @@ export function BranchingTab({ node, groupsForNode, onEditGroup, caseSet, onCase
                 onChange={(e) => patchCaseSet({ label: e.target.value || undefined })}
               />
               <span className="muted small">{`fork → ${caseSet!.variants.length} branches`}</span>
+              <JsonLogicHint ctx="default" triggerLabel="Variant overrides accept literals or JSONLogic" />
               <button className="term-action danger" onClick={removeCaseSet}>[remove]</button>
             </div>
             {caseSet!.variants.map((v, vi) => (

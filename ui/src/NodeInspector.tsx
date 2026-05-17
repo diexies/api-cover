@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ApiNode, CaseSet, EndpointDescriptor, ExecutionGroup, NodeIteration } from './api';
+import type { ApiNode, CaseSet, EndpointDescriptor, ExecutionGroup, NodeIteration, NodeResult } from './api';
 import { IdentityBlock } from './inspector/IdentityBlock';
 import { TabBar, type InspectorTab } from './inspector/TabBar';
 import { OverviewTab } from './inspector/OverviewTab';
 import { RequestTab } from './inspector/RequestTab';
+import { ResponseTab } from './inspector/ResponseTab';
 import { WiringTab } from './inspector/WiringTab';
 import { BranchingTab } from './inspector/BranchingTab';
 import { CallGraphTab } from './inspector/CallGraphTab';
 import { HistoryTab } from './inspector/HistoryTab';
 import { parseMaybeJson, stringifyValue, type KV } from './inspector/KVEditor';
 import { staggerChild, staggerParent } from './inspector/animations';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { usePrefs } from './stores/prefs';
+
+const VALID_TABS = ['overview', 'request', 'response', 'wiring', 'branching', 'internals', 'history'] as const;
+function asInspectorTab(v: string): InspectorTab {
+  return (VALID_TABS as readonly string[]).includes(v) ? (v as InspectorTab) : 'overview';
+}
 
 interface Props {
   node: ApiNode;
@@ -17,6 +25,8 @@ interface Props {
   isStartNode: boolean;
   groupsForNode?: ExecutionGroup[];
   iterations?: NodeIteration[];
+  /** Aggregate NodeResult for this node from the active run — feeds the Response tab. */
+  latestResult?: NodeResult;
   /** Other nodes in the same scenario — surfaced in the wiring graph. */
   siblings?: ApiNode[];
   /** Direct upstream node ids (edges that point at this node). */
@@ -37,6 +47,12 @@ interface Props {
   onFocusNode?: (id: string) => void;
   /** Open the GroupSettingsModal for a specific group (used by Branching tab). */
   onEditGroup?: (groupId: string) => void;
+  /** All scenario groups — drives the "add to group" picker in BranchingTab. */
+  allGroups?: ExecutionGroup[];
+  /** Persist a single group mutation (add/remove membership from BranchingTab). */
+  onUpdateGroup?: (next: ExecutionGroup) => void;
+  /** Drop a group entirely when last member is removed. */
+  onDeleteGroup?: (groupId: string) => void;
   /** CaseSet attached to this node, if any (the anchor). */
   caseSetForNode?: CaseSet;
   /** Persist a new/edited case set, or remove (null) it. */
@@ -49,13 +65,28 @@ interface Props {
 /**
  * Right-side inspector for the currently selected canvas node. Pinned identity card +
  * 5-tab strip + tab content. Composes leaf components from `inspector/`.
+ *
+ * Wrapped in its own ErrorBoundary so a tab render exception (bad JSONLogic, malformed
+ * iteration data) does not kill the parent canvas.
  */
-export function NodeInspector({
+export function NodeInspector(props: Props) {
+  return (
+    <ErrorBoundary name="NodeInspector">
+      <NodeInspectorInner {...props} />
+    </ErrorBoundary>
+  );
+}
+
+function NodeInspectorInner({
   node,
   endpoint,
   isStartNode,
   groupsForNode,
+  allGroups,
+  onUpdateGroup,
+  onDeleteGroup,
   iterations,
+  latestResult,
   siblings,
   upstreamIds,
   downstreamIds,
@@ -81,7 +112,15 @@ export function NodeInspector({
   const [bodyMode, setBodyMode] = useState<'form' | 'raw'>('form');
   const [shouldRunText, setShouldRunText] = useState<string>(() => stringifyOrEmpty(node.shouldRun));
   const [shouldRunError, setShouldRunError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<InspectorTab>('overview');
+  // Persist last-used tab across scenarios + page reloads via the prefs store. Falls back
+  // to 'overview' when the stored value is invalid (e.g. an old tab id that no longer exists).
+  const storedTab = usePrefs((s) => s.inspectorTab);
+  const setPrefsTab = usePrefs((s) => s.set);
+  const [activeTab, setActiveTabLocal] = useState<InspectorTab>(() => asInspectorTab(storedTab));
+  const setActiveTab = (t: InspectorTab) => {
+    setActiveTabLocal(t);
+    setPrefsTab('inspectorTab', t);
+  };
 
   // Reset local state when a different node is selected.
   useEffect(() => {
@@ -191,7 +230,9 @@ export function NodeInspector({
   };
 
   const noBranching = (groupsForNode?.length ?? 0) === 0 && variantFork === 0;
-  const dimmedTabs: InspectorTab[] = noBranching ? ['branching'] : [];
+  const dimmedTabs: InspectorTab[] = [];
+  if (noBranching) dimmedTabs.push('branching');
+  if (!latestResult) dimmedTabs.push('response');
 
   // Keyboard shortcut 1–5 to switch tabs (when focus is not in an input).
   useEffect(() => {
@@ -280,7 +321,13 @@ export function NodeInspector({
               onBodyChange={(v) => applyChanges({ body: v })}
               onBodyTextChange={commitBody}
               onLoadSample={loadSample}
+              onStreamingChange={(next) => applyChanges({ streaming: next })}
             />
+          </div>
+        )}
+        {activeTab === 'response' && (
+          <div style={staggerChild(0)}>
+            <ResponseTab result={latestResult} />
           </div>
         )}
         {activeTab === 'wiring' && (
@@ -304,7 +351,10 @@ export function NodeInspector({
             <BranchingTab
               node={node}
               groupsForNode={groupsForNode ?? []}
+              allGroups={allGroups}
               onEditGroup={(gid) => onEditGroup?.(gid)}
+              onUpdateGroup={onUpdateGroup}
+              onDeleteGroup={onDeleteGroup}
               caseSet={caseSetForNode}
               onCaseSetChange={onCaseSetChange}
             />
