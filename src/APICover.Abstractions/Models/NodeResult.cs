@@ -14,6 +14,17 @@ public sealed class RequestSnapshot
     public IDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
     public JsonNode? Body { get; init; }
     public string? ContentType { get; init; }
+
+    /// <summary>Copy with cloned body so two owners never serialize the same JsonNode.</summary>
+    public RequestSnapshot Snapshot() => new()
+    {
+        Method = Method,
+        Path = Path,
+        Url = Url,
+        Headers = new Dictionary<string, string>(Headers),
+        Body = Body?.DeepClone(),
+        ContentType = ContentType
+    };
 }
 
 /// <summary>
@@ -25,6 +36,15 @@ public sealed class ResponseSnapshot
     public IDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
     public JsonNode? Body { get; init; }
     public string? ContentType { get; init; }
+
+    /// <summary>Copy with cloned body so two owners never serialize the same JsonNode.</summary>
+    public ResponseSnapshot Snapshot() => new()
+    {
+        Status = Status,
+        Headers = new Dictionary<string, string>(Headers),
+        Body = Body?.DeepClone(),
+        ContentType = ContentType
+    };
 }
 
 /// <summary>
@@ -61,6 +81,20 @@ public sealed class NodeResult
     /// node-level fields for backwards-compat consumers (status, request, response).
     /// </summary>
     public IList<NodeIteration> Iterations { get; init; } = new List<NodeIteration>();
+
+    /// <summary>Copy safe to serialize while the engine keeps mutating the live record.</summary>
+    public NodeResult Snapshot() => new()
+    {
+        NodeId = NodeId,
+        BranchPath = BranchPath.ToList(),
+        Status = Status,
+        Request = Request?.Snapshot(),
+        Response = Response?.Snapshot(),
+        StartedAt = StartedAt,
+        CompletedAt = CompletedAt,
+        Error = Error,
+        Iterations = Iterations.ToList()
+    };
 }
 
 /// <summary>One execution of a node inside a repeated <see cref="ExecutionGroup"/>.</summary>

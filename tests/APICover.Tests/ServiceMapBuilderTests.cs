@@ -86,18 +86,26 @@ public class ServiceMapBuilderTests
     }
 
     [Fact]
-    public async Task IdentifiesIslands_TwoDisconnectedSubgraphs()
+    public async Task CollapsesSubgraphsIntoAppRoot_AndIslandsIsolatedEndpoints()
     {
+        // Endpoints that reach a boundary get an app:host edge, so otherwise-disconnected
+        // subgraphs deliberately collapse into one component; only endpoints with no
+        // downstream calls are flagged isolated and left as their own island.
         var g1 = MakeGraph("GET /alpha", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.AlphaSvc", "M")));
         var g2 = MakeGraph("GET /beta", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.BetaSvc", "M")));
+        var lonely = MakeGraph("GET /lonely", _ => { });
 
-        var map = await BuildMap(new[] { g1, g2 });
+        var map = await BuildMap(new[] { g1, g2, lonely });
 
-        Assert.True(map.Islands.Count >= 2,
-            $"expected ≥ 2 islands, got {map.Islands.Count}");
         var alphaIsland = map.Nodes.First(n => n.Id == "GET /alpha").IslandIndex;
         var betaIsland = map.Nodes.First(n => n.Id == "GET /beta").IslandIndex;
-        Assert.NotEqual(alphaIsland, betaIsland);
+        Assert.Equal(alphaIsland, betaIsland);
+
+        var lonelyNode = map.Nodes.First(n => n.Id == "GET /lonely");
+        Assert.True(lonelyNode.IsIsolated);
+        Assert.NotEqual(alphaIsland, lonelyNode.IslandIndex);
+        Assert.True(map.Islands.Count >= 2,
+            $"expected ≥ 2 islands, got {map.Islands.Count}");
     }
 
     [Fact]

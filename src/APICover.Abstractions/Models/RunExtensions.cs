@@ -9,7 +9,35 @@ public static class RunExtensions
     /// if no record exists yet (node not reached on that branch).</summary>
     public static NodeResult? GetResult(this Run run, string nodeId, BranchPath branchPath)
     {
-        var key = branchPath.Key;
+        lock (run.SyncRoot)
+        {
+            return FindResult(run, nodeId, branchPath.Key);
+        }
+    }
+
+    /// <summary>Find or create the node result entry for (nodeId, branchPath). Newly created
+    /// entries start as Pending and are appended to <see cref="Run.NodeResults"/>. Atomic under
+    /// <see cref="Run.SyncRoot"/> — concurrent branch tasks racing the same key get the same
+    /// record back instead of appending duplicates.</summary>
+    public static NodeResult GetOrAddResult(this Run run, string nodeId, BranchPath branchPath)
+    {
+        lock (run.SyncRoot)
+        {
+            var existing = FindResult(run, nodeId, branchPath.Key);
+            if (existing is not null) return existing;
+            var fresh = new NodeResult
+            {
+                NodeId = nodeId,
+                BranchPath = branchPath.Segments.ToList(),
+                Status = NodeStatus.Pending
+            };
+            run.NodeResults.Add(fresh);
+            return fresh;
+        }
+    }
+
+    private static NodeResult? FindResult(Run run, string nodeId, string key)
+    {
         for (var i = 0; i < run.NodeResults.Count; i++)
         {
             var r = run.NodeResults[i];
@@ -17,22 +45,6 @@ public static class RunExtensions
             if (BranchKey(r) == key) return r;
         }
         return null;
-    }
-
-    /// <summary>Find or create the node result entry for (nodeId, branchPath). Newly created
-    /// entries start as Pending and are appended to <see cref="Run.NodeResults"/>.</summary>
-    public static NodeResult GetOrAddResult(this Run run, string nodeId, BranchPath branchPath)
-    {
-        var existing = run.GetResult(nodeId, branchPath);
-        if (existing is not null) return existing;
-        var fresh = new NodeResult
-        {
-            NodeId = nodeId,
-            BranchPath = branchPath.Segments.ToList(),
-            Status = NodeStatus.Pending
-        };
-        run.NodeResults.Add(fresh);
-        return fresh;
     }
 
     /// <summary>True if any record exists for this node on this branch.</summary>

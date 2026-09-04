@@ -96,7 +96,9 @@ public sealed class ScenarioEngine : IScenarioEngine
         // Fire-and-forget execution; callers observe progress via run/runStore or the SSE event bus.
         _ = Task.Run(() => ExecuteAsync(scenario, run, options, cancellationToken), CancellationToken.None);
 
-        return run;
+        // Branches may already be appending NodeResults — callers get a snapshot, never the
+        // live instance, or response serialization races the engine.
+        return run.Snapshot();
     }
 
     private async Task ExecuteAsync(Scenario scenario, Run run, RunOptions options, CancellationToken cancellationToken)
@@ -137,12 +139,13 @@ public sealed class ScenarioEngine : IScenarioEngine
         }
 
         // Cross-branch save serializer; without it concurrent SaveAsync calls from forked
-        // branches racing into the same Run document can clobber each other.
+        // branches racing into the same Run document can clobber each other. Saves a snapshot,
+        // not the live run — stores serialize/keep the document while branches keep mutating.
         var runStateLock = new SemaphoreSlim(1, 1);
         async Task SaveRun()
         {
             await runStateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try { await _runStore.SaveAsync(run, cancellationToken).ConfigureAwait(false); }
+            try { await _runStore.SaveAsync(run.Snapshot(), cancellationToken).ConfigureAwait(false); }
             finally { runStateLock.Release(); }
         }
 
@@ -198,12 +201,13 @@ public sealed class ScenarioEngine : IScenarioEngine
         finally
         {
             run.CompletedAt = DateTimeOffset.UtcNow;
-            await _runStore.SaveAsync(run, CancellationToken.None).ConfigureAwait(false);
+            var final = run.Snapshot();
+            await _runStore.SaveAsync(final, CancellationToken.None).ConfigureAwait(false);
             _eventBus.Publish(run.Id, new RunEvent
             {
                 Type = RunEventType.RunFinished,
                 RunId = run.Id,
-                Payload = run
+                Payload = final
             });
         }
 
