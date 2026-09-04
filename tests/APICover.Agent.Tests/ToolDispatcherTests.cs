@@ -151,6 +151,74 @@ public class ToolDispatcherTests
         Assert.Equal(new[] { "POST /withdrawals", "POST /credit/approve" }, chain);
     }
 
+    [Fact]
+    public async Task Plan_AddUpdateList_PersistsAcrossDispatcherInstances()
+    {
+        var memory = new InMemoryAgentMemoryStore();
+        var d1 = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), memory, new APICover.Storage.InMemoryScenarioStore());
+
+        var added = await d1.DispatchAsync(ToolRegistry.PlanAdd, new JsonObject { ["title"] = "Scan communities" }, default);
+        Assert.False(added.IsError, added.Output.ToJsonString());
+        Assert.Equal(1, added.Output["id"]!.GetValue<int>());
+        Assert.Equal("pending", added.Output["status"]!.GetValue<string>());
+
+        await d1.DispatchAsync(ToolRegistry.PlanAdd, new JsonObject { ["title"] = "Author scenarios" }, default);
+        var updated = await d1.DispatchAsync(ToolRegistry.PlanUpdate, new JsonObject { ["id"] = 1, ["status"] = "done" }, default);
+        Assert.Equal("done", updated.Output["status"]!.GetValue<string>());
+
+        // Fresh dispatcher, same memory store — plan must survive (cross-run persistence).
+        var d2 = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), memory, new APICover.Storage.InMemoryScenarioStore());
+        var listed = await d2.DispatchAsync(ToolRegistry.PlanList, null, default);
+        Assert.Equal(2, listed.Output["count"]!.GetValue<int>());
+        Assert.Equal(1, listed.Output["open"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task Dataset_SaveAndPagedRead()
+    {
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), new APICover.Storage.InMemoryScenarioStore());
+        var records = new JsonArray();
+        for (var i = 0; i < 30; i++) records.Add(new JsonObject { ["name"] = $"user-{i}", ["amount"] = i * 10 });
+
+        var saved = await dispatcher.DispatchAsync(ToolRegistry.DatasetSave,
+            new JsonObject { ["name"] = "Test Customers!", ["records"] = records }, default);
+        Assert.Equal("test-customers", saved.Output["name"]!.GetValue<string>());
+        Assert.Equal(30, saved.Output["recordCount"]!.GetValue<int>());
+
+        var name = saved.Output["name"]!.GetValue<string>();
+        var page = await dispatcher.DispatchAsync(ToolRegistry.DatasetRead,
+            new JsonObject { ["name"] = name, ["offset"] = 25, ["limit"] = 10 }, default);
+        Assert.Equal(30, page.Output["total"]!.GetValue<int>());
+        Assert.Equal(5, page.Output["records"]!.AsArray().Count);
+        Assert.Equal("user-25", page.Output["records"]!.AsArray()[0]!["name"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Playground_ResetDeletesOnlyPrefixedScenarios()
+    {
+        var memory = new InMemoryAgentMemoryStore();
+        var scenarios = new APICover.Storage.InMemoryScenarioStore();
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), memory, scenarios);
+
+        var started = await dispatcher.DispatchAsync(ToolRegistry.PlaygroundStart, new JsonObject { ["name"] = "load-trial" }, default);
+        var prefix = started.Output["scenarioPrefix"]!.GetValue<string>();
+        Assert.Equal("pg-load-trial-", prefix);
+
+        await scenarios.SaveAsync(new Scenario { Id = $"{prefix}exp1", Name = "trial 1" });
+        await scenarios.SaveAsync(new Scenario { Id = $"{prefix}exp2", Name = "trial 2" });
+        await scenarios.SaveAsync(new Scenario { Id = "real-flow", Name = "keep me" });
+
+        var reset = await dispatcher.DispatchAsync(ToolRegistry.PlaygroundReset, null, default);
+        Assert.Equal(2, reset.Output["deletedScenarioCount"]!.GetValue<int>());
+        var remaining = await scenarios.ListAsync();
+        Assert.Single(remaining);
+        Assert.Equal("real-flow", remaining[0].Id);
+
+        // Reset closed the workspace — a new playground can start.
+        var second = await dispatcher.DispatchAsync(ToolRegistry.PlaygroundStart, new JsonObject { ["name"] = "next" }, default);
+        Assert.Equal("pg-next-", second.Output["scenarioPrefix"]!.GetValue<string>());
+    }
+
     private static NodeResult MakeResult(string nodeId, string[] branch, NodeStatus status, int httpStatus, string? error = null) => new()
     {
         NodeId = nodeId,

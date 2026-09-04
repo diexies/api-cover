@@ -66,6 +66,14 @@ public sealed class ToolDispatcher
                 ToolRegistry.RunScenario => await HandleRunScenarioAsync(input, cancellationToken),
                 ToolRegistry.GetDirtyCommunities => await HandleGetDirtyCommunitiesAsync(input, cancellationToken),
                 ToolRegistry.ListScenarios => await HandleListScenariosAsync(cancellationToken),
+                ToolRegistry.PlanAdd => await HandlePlanAddAsync(input, cancellationToken),
+                ToolRegistry.PlanUpdate => await HandlePlanUpdateAsync(input, cancellationToken),
+                ToolRegistry.PlanList => await HandlePlanListAsync(cancellationToken),
+                ToolRegistry.DatasetSave => await HandleDatasetSaveAsync(input, cancellationToken),
+                ToolRegistry.DatasetList => await HandleDatasetListAsync(cancellationToken),
+                ToolRegistry.DatasetRead => await HandleDatasetReadAsync(input, cancellationToken),
+                ToolRegistry.PlaygroundStart => await HandlePlaygroundStartAsync(input, cancellationToken),
+                ToolRegistry.PlaygroundReset => await HandlePlaygroundResetAsync(cancellationToken),
                 _ => null
             };
 
@@ -158,6 +166,183 @@ public sealed class ToolDispatcher
 
     private static string? Truncate(string? s, int max)
         => s is null ? null : s.Length <= max ? s : s[..max] + "…";
+
+    /* ─── Plan: persistent agent-internal task list (plan/tasks.json) ─────── */
+
+    private const string PlanPath = "plan/tasks.json";
+    private const string PlaygroundPath = "playground/current.json";
+
+    private async Task<JsonObject> ReadPlanAsync(CancellationToken ct)
+    {
+        var raw = await _memory.ReadAsync(PlanPath, ct);
+        if (raw is not null)
+        {
+            try { if (JsonNode.Parse(raw) is JsonObject o) return o; } catch { /* corrupt — reinit */ }
+        }
+        return new JsonObject { ["nextId"] = 1, ["tasks"] = new JsonArray() };
+    }
+
+    private async Task<JsonNode> HandlePlanAddAsync(JsonNode? input, CancellationToken ct)
+    {
+        var title = input?["title"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrEmpty(title)) return JsonValue.Create("Required field 'title' is missing.")!;
+        var plan = await ReadPlanAsync(ct);
+        var id = plan["nextId"]!.GetValue<int>();
+        var task = new JsonObject
+        {
+            ["id"] = id,
+            ["title"] = title,
+            ["detail"] = input?["detail"]?.GetValue<string>(),
+            ["status"] = "pending",
+            ["updatedAt"] = DateTimeOffset.UtcNow.ToString("O"),
+        };
+        plan["tasks"]!.AsArray().Add(task);
+        plan["nextId"] = id + 1;
+        await _memory.WriteAsync(PlanPath, plan.ToJsonString(ScenarioJsonOptions), ct);
+        return task.DeepClone();
+    }
+
+    private async Task<JsonNode> HandlePlanUpdateAsync(JsonNode? input, CancellationToken ct)
+    {
+        var id = input?["id"]?.GetValue<int>() ?? -1;
+        var status = input?["status"]?.GetValue<string>();
+        if (id < 0 || status is not ("pending" or "in_progress" or "done" or "blocked"))
+        {
+            return JsonValue.Create("Required: id (int) + status (pending|in_progress|done|blocked).")!;
+        }
+        var plan = await ReadPlanAsync(ct);
+        var task = plan["tasks"]!.AsArray().FirstOrDefault(t => t?["id"]?.GetValue<int>() == id);
+        if (task is null) return JsonValue.Create($"No plan task with id {id}. Call plan_list.")!;
+        task["status"] = status;
+        if (input?["detail"]?.GetValue<string>() is { Length: > 0 } detail) task["detail"] = detail;
+        task["updatedAt"] = DateTimeOffset.UtcNow.ToString("O");
+        await _memory.WriteAsync(PlanPath, plan.ToJsonString(ScenarioJsonOptions), ct);
+        return task.DeepClone();
+    }
+
+    private async Task<JsonNode> HandlePlanListAsync(CancellationToken ct)
+    {
+        var plan = await ReadPlanAsync(ct);
+        var tasks = plan["tasks"]!.AsArray();
+        return new JsonObject
+        {
+            ["count"] = tasks.Count,
+            ["open"] = tasks.Count(t => t?["status"]?.GetValue<string>() is "pending" or "in_progress" or "blocked"),
+            ["tasks"] = tasks.DeepClone(),
+        };
+    }
+
+    /* ─── Datasets: experiment data under datasets/<name>.json ────────────── */
+
+    private async Task<JsonNode> HandleDatasetSaveAsync(JsonNode? input, CancellationToken ct)
+    {
+        var name = Slug(input?["name"]?.GetValue<string>());
+        if (name.Length == 0) return JsonValue.Create("Required field 'name' is missing.")!;
+        if (input?["records"] is not JsonArray records || records.Count == 0)
+        {
+            return JsonValue.Create("Required field 'records' must be a non-empty JSON array.")!;
+        }
+        await _memory.WriteAsync($"datasets/{name}.json", records.ToJsonString(ScenarioJsonOptions), ct);
+        return new JsonObject
+        {
+            ["name"] = name,
+            ["recordCount"] = records.Count,
+            ["fields"] = new JsonArray((records[0] as JsonObject)?.Select(kv => (JsonNode)JsonValue.Create(kv.Key)!).ToArray() ?? Array.Empty<JsonNode>()),
+        };
+    }
+
+    private async Task<JsonNode> HandleDatasetListAsync(CancellationToken ct)
+    {
+        var entries = await _memory.ListAsync("datasets/", ct);
+        var items = new JsonArray();
+        foreach (var e in entries)
+        {
+            var raw = await _memory.ReadAsync(e.Path, ct);
+            var arr = raw is null ? null : JsonNode.Parse(raw) as JsonArray;
+            items.Add(new JsonObject
+            {
+                ["name"] = System.IO.Path.GetFileNameWithoutExtension(e.Path),
+                ["recordCount"] = arr?.Count ?? 0,
+                ["fields"] = new JsonArray((arr?.FirstOrDefault() as JsonObject)?.Select(kv => (JsonNode)JsonValue.Create(kv.Key)!).ToArray() ?? Array.Empty<JsonNode>()),
+            });
+        }
+        return new JsonObject { ["count"] = items.Count, ["datasets"] = items };
+    }
+
+    private async Task<JsonNode> HandleDatasetReadAsync(JsonNode? input, CancellationToken ct)
+    {
+        var name = Slug(input?["name"]?.GetValue<string>());
+        var raw = await _memory.ReadAsync($"datasets/{name}.json", ct);
+        if (raw is null) return JsonValue.Create($"No dataset '{name}'. Call dataset_list.")!;
+        var records = JsonNode.Parse(raw)!.AsArray();
+        var offset = Math.Max(0, input?["offset"]?.GetValue<int>() ?? 0);
+        var limit = Math.Clamp(input?["limit"]?.GetValue<int>() ?? 20, 1, 100);
+        var page = new JsonArray(records.Skip(offset).Take(limit).Select(r => r!.DeepClone()).ToArray());
+        return new JsonObject
+        {
+            ["name"] = name,
+            ["total"] = records.Count,
+            ["offset"] = offset,
+            ["limit"] = limit,
+            ["records"] = page,
+        };
+    }
+
+    /* ─── Playground: disposable experiment workspace ─────────────────────── */
+
+    private async Task<JsonNode> HandlePlaygroundStartAsync(JsonNode? input, CancellationToken ct)
+    {
+        var name = Slug(input?["name"]?.GetValue<string>());
+        if (name.Length == 0) return JsonValue.Create("Required field 'name' is missing.")!;
+        var existing = await _memory.ReadAsync(PlaygroundPath, ct);
+        if (existing is not null)
+        {
+            return JsonValue.Create("A playground is already active. Call playground_reset first, or continue using its scenarioPrefix.")!;
+        }
+        var doc = new JsonObject
+        {
+            ["name"] = name,
+            ["scenarioPrefix"] = $"pg-{name}-",
+            ["startedAt"] = DateTimeOffset.UtcNow.ToString("O"),
+        };
+        await _memory.WriteAsync(PlaygroundPath, doc.ToJsonString(ScenarioJsonOptions), ct);
+        doc["instruction"] = "Every experiment scenario id MUST start with scenarioPrefix; playground_reset wipes exactly those.";
+        return doc;
+    }
+
+    private async Task<JsonNode> HandlePlaygroundResetAsync(CancellationToken ct)
+    {
+        var raw = await _memory.ReadAsync(PlaygroundPath, ct);
+        if (raw is null) return JsonValue.Create("No active playground.")!;
+        var doc = JsonNode.Parse(raw)!.AsObject();
+        var prefix = doc["scenarioPrefix"]!.GetValue<string>();
+        var deleted = new JsonArray();
+        foreach (var s in await _scenarios.ListAsync(ct))
+        {
+            if (!s.Id.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            await _scenarios.DeleteAsync(s.Id, ct);
+            deleted.Add(s.Id);
+        }
+        await _memory.DeleteAsync(PlaygroundPath, ct);
+        return new JsonObject
+        {
+            ["name"] = doc["name"]!.DeepClone(),
+            ["deletedScenarioCount"] = deleted.Count,
+            ["deletedScenarioIds"] = deleted,
+            ["note"] = "Datasets and memory files were kept.",
+        };
+    }
+
+    private static string Slug(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+        var chars = s.Trim().ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+        var slug = new string(chars);
+        while (slug.Contains("--")) slug = slug.Replace("--", "-");
+        return slug.Trim('-');
+    }
 
     private async Task<JsonNode> HandleListScenariosAsync(CancellationToken cancellationToken)
     {

@@ -18,7 +18,8 @@ public enum AgentRunMode
     ScenarioGen = 2,
     ScenarioInfer = 3,
     Qa = 4,
-    Align = 5
+    Align = 5,
+    Auto = 6
 }
 
 /// <summary>
@@ -203,6 +204,33 @@ public sealed class AgentRunCoordinator
       + "(staleness + incremental-scan anchor)\n"
       + "5. Maintain `index.md` after every write — one line per file with a read-when hook.\n"
       + "6. STOP. Do not produce conversational output — your work is the memory files.\n";
+
+    private const string AutoModeTail =
+        "## Mode: auto (self-orchestrating goal execution)\n\n"
+      + "The user hands you ONE prompt describing a goal — possibly with a dataset — and "
+      + "you manage the whole effort yourself: plan, store, experiment, verify, report. "
+      + "Discipline:\n\n"
+      + "1. RESUME OR PLAN. `plan_list` first. Open tasks from a previous run? Continue "
+      + "them. Otherwise decompose the goal into 3-8 concrete tasks via `plan_add` BEFORE "
+      + "doing any work. No work outside a plan task.\n"
+      + "2. STORE DATA. If the prompt carries sample data (JSON, CSV, tables), normalise "
+      + "to records and `dataset_save` it immediately — never keep data only in context. "
+      + "Reference datasets by name from then on; page with `dataset_read`.\n"
+      + "3. PLAYGROUND. Experiments that the user did not ask to keep run inside "
+      + "`playground_start` — all trial scenario ids take the returned prefix. Real, "
+      + "keep-worthy scenarios are saved WITHOUT the prefix. When trials conclude, "
+      + "summarise learnings into memory (experiments/<name>.md) THEN `playground_reset`.\n"
+      + "4. EXECUTE task-by-task: `plan_update` to in_progress, do the work with the full "
+      + "toolbox (communities, scenarios, run_scenario, datasets), verify the outcome "
+      + "actually happened (run it, read it back), `plan_update` to done. Blocked? Mark "
+      + "blocked with the reason and move to the next task.\n"
+      + "5. DATASET-DRIVEN TRIALS. Feed records into scenario bodies or case-set variants "
+      + "(one variant per representative record — sample, don't exhaust; respect branch "
+      + "caps). Failures per record class are findings.\n"
+      + "6. REPORT. End with: plan table (task → status), datasets stored, scenarios "
+      + "kept vs playground-wiped, findings with evidence, and what remains open.\n\n"
+      + "Hard rules: never invent endpoints; never delete non-playground scenarios; "
+      + "memory writes follow the memory protocol.\n";
 
     private const string AlignModeTail =
         "## Mode: align (intent capture + gap analysis)\n\n"
@@ -785,6 +813,7 @@ public sealed class AgentRunCoordinator
             AgentRunMode.ScenarioInfer => ScenarioInferModeTail,
             AgentRunMode.Qa => QaModeTail,
             AgentRunMode.Align => AlignModeTail,
+            AgentRunMode.Auto => AutoModeTail,
             _ => ChatModeTail
         };
         // Scenario modes do not benefit from the memory index — skip the bloat.

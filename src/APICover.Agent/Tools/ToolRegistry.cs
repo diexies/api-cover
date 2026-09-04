@@ -23,6 +23,14 @@ public static class ToolRegistry
     public const string RunScenario = "run_scenario";
     public const string GetDirtyCommunities = "get_dirty_communities";
     public const string ListScenarios = "list_scenarios";
+    public const string PlanAdd = "plan_add";
+    public const string PlanUpdate = "plan_update";
+    public const string PlanList = "plan_list";
+    public const string DatasetSave = "dataset_save";
+    public const string DatasetList = "dataset_list";
+    public const string DatasetRead = "dataset_read";
+    public const string PlaygroundStart = "playground_start";
+    public const string PlaygroundReset = "playground_reset";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
 
@@ -304,6 +312,121 @@ public static class ToolRegistry
                   + "user's described flow against node chains and descriptions — and to "
                   + "check which declared intents already have scenario coverage before "
                   + "authoring new ones.",
+                InputSchema = JsonNode.Parse("""{ "type": "object", "properties": {} }""")!
+            },
+            new ToolDefinition
+            {
+                Name = PlanAdd,
+                Description =
+                    "Add a task to your persistent internal plan (plan/tasks.json). Use at "
+                  + "the START of any multi-step goal: decompose the goal into tasks first, "
+                  + "then execute task-by-task, updating status as you go. The plan survives "
+                  + "across runs — a later session picks up where you stopped.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["title"],
+                  "properties": {
+                    "title": { "type": "string", "description": "Imperative task title." },
+                    "detail": { "type": "string", "description": "What done looks like; inputs/outputs." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = PlanUpdate,
+                Description =
+                    "Update a plan task's status. Statuses: pending, in_progress, done, "
+                  + "blocked (append the blocker to detail). Mark in_progress BEFORE working "
+                  + "a task and done immediately after verifying it.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["id", "status"],
+                  "properties": {
+                    "id": { "type": "integer" },
+                    "status": { "type": "string", "enum": ["pending", "in_progress", "done", "blocked"] },
+                    "detail": { "type": "string", "description": "Optional replacement detail (e.g. blocker note, result pointer)." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = PlanList,
+                Description = "List the persistent plan tasks with ids and statuses. Call at the start of every run to resume unfinished work.",
+                InputSchema = JsonNode.Parse("""{ "type": "object", "properties": {} }""")!
+            },
+            new ToolDefinition
+            {
+                Name = DatasetSave,
+                Description =
+                    "Persist a dataset (JSON array of records) under datasets/<name>.json for "
+                  + "experiment runs. Use when the user hands you sample data (convert CSV to "
+                  + "JSON records first). Records typically feed scenario bodies, case-set "
+                  + "variants, or execution-group iterations.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["name", "records"],
+                  "properties": {
+                    "name": { "type": "string", "description": "kebab-case dataset name" },
+                    "records": { "type": "array", "items": { "type": "object" }, "description": "Homogeneous JSON records." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = DatasetList,
+                Description = "List stored datasets with record counts and field names.",
+                InputSchema = JsonNode.Parse("""{ "type": "object", "properties": {} }""")!
+            },
+            new ToolDefinition
+            {
+                Name = DatasetRead,
+                Description =
+                    "Read records from a stored dataset with offset/limit paging so large "
+                  + "datasets never flood the context. Default limit 20.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "offset": { "type": "integer" },
+                    "limit": { "type": "integer" }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = PlaygroundStart,
+                Description =
+                    "Open a disposable experiment workspace. Returns a scenarioPrefix — every "
+                  + "scenario you save during the experiment MUST use ids starting with that "
+                  + "prefix so playground_reset can wipe them without touching real scenarios. "
+                  + "Use for dataset-driven trials and exploratory runs the user has not asked "
+                  + "to keep.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": { "type": "string", "description": "kebab-case experiment name" }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = PlaygroundReset,
+                Description =
+                    "Tear down the active playground: deletes every scenario whose id starts "
+                  + "with the playground's scenarioPrefix and closes the workspace. Datasets "
+                  + "and memory files are kept. Reports what was deleted.",
                 InputSchema = JsonNode.Parse("""{ "type": "object", "properties": {} }""")!
             }
         };

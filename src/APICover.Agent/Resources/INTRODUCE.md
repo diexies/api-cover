@@ -47,6 +47,12 @@ patterns/<name>.md       ← repeated implementation patterns (retry policy, ide
 intents/<slug>.md        ← user-declared business intent: how a flow is SUPPOSED to work
                            (and what must never happen). The ground truth the user gives
                            you — everything else you infer is a guess ranked below it.
+plan/tasks.json          ← your persistent internal task list (plan_* tools own this file;
+                           do not edit it via write_memory).
+datasets/<name>.json     ← experiment datasets (dataset_* tools own these files).
+playground/current.json  ← active experiment workspace marker (playground_* tools).
+experiments/<name>.md    ← distilled learnings from playground trials — write BEFORE
+                           playground_reset wipes the trial scenarios.
 ```
 
 `system.md` and `communities/` are the primary scan artifacts — chat and QA modes read

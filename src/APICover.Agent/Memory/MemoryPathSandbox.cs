@@ -2,8 +2,9 @@ namespace APICover.Agent.Memory;
 
 /// <summary>
 /// Validates and normalises memory paths. Hard rules: relative only, no <c>..</c>, no
-/// absolute, no drive letters, no NUL, only forward slashes, must end in <c>.md</c>,
-/// segments must be ASCII letters/digits/dash/underscore. Anything else throws.
+/// absolute, no drive letters, no NUL, only forward slashes, must end in <c>.md</c> or
+/// <c>.json</c> (structured stores: plan/, datasets/, playground/), segments must be
+/// ASCII letters/digits/dash/underscore. Anything else throws.
 /// </summary>
 internal static class MemoryPathSandbox
 {
@@ -52,9 +53,9 @@ internal static class MemoryPathSandbox
         }
 
         var lowered = string.Join('/', segments).ToLowerInvariant();
-        if (!lowered.EndsWith(".md", StringComparison.Ordinal))
+        if (!lowered.EndsWith(".md", StringComparison.Ordinal) && !lowered.EndsWith(".json", StringComparison.Ordinal))
         {
-            throw new ArgumentException("Memory paths must end in '.md'.", nameof(input));
+            throw new ArgumentException("Memory paths must end in '.md' or '.json'.", nameof(input));
         }
         return lowered;
     }
