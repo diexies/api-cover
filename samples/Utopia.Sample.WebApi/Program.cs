@@ -33,8 +33,9 @@ builder.Services.AddAPICoverMcp();
 
 var app = builder.Build();
 
-// In-memory user store for the demo.
-var users = new Dictionary<int, User>();
+// In-memory user store for the demo. Concurrent — branched runs POST here in
+// parallel (MaxConcurrentBranches), and a plain Dictionary corrupts under that.
+var users = new System.Collections.Concurrent.ConcurrentDictionary<int, User>();
 var nextId = 0;
 
 app.MapGet("/", () => "Utopia.Sample.WebApi")
