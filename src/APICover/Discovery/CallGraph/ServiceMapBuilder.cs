@@ -285,11 +285,15 @@ internal sealed class ServiceMapBuilder : IServiceMapService
                     var l = label[n];
                     counts[l] = counts.GetValueOrDefault(l) + 1;
                 }
-                string best = label[id];
-                var bestCount = -1;
+                // Sticky tie-break: only adopt a neighbour label that STRICTLY beats the
+                // current one. A smallest-ordinal tie-break here lets an ordinally-small
+                // label bleed across single-edge seams and swallow the neighbouring
+                // domain (classic LPA instability).
+                var best = label[id];
+                var bestCount = counts.GetValueOrDefault(best);
                 foreach (var (l, c) in counts)
                 {
-                    if (c > bestCount || (c == bestCount && string.CompareOrdinal(l, best) < 0))
+                    if (c > bestCount || (c == bestCount && c > 0 && best != label[id] && string.CompareOrdinal(l, best) < 0))
                     {
                         best = l;
                         bestCount = c;

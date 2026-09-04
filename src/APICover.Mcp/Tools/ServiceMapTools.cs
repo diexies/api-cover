@@ -259,6 +259,24 @@ public static class ServiceMapTools
         return new { metric, take, kind, items };
     }
 
+    [McpServerTool(Name = "system.communities")]
+    [Description("WHEN: FIRST call when asked to understand the system, infer scenarios, or hunt bugs on a large surface. Table of contents of the host: structurally-detected domain communities (users, invoicing, …), risk-ordered, with cross-community links.\n\nWork community-by-community: pick the highest-risk community, pull system.community_context for it, reason, move on. Cross-community links are where integrated UI journeys live.\n\nResponse: { generatedAt, totalEndpoints, totalCommunities, communities:[{ index, label, riskScore, endpointCount, serviceCount, boundaryCount, topEndpoints[5], connectsTo:[{communityIndex,label,sharedEdges}] }] }.")]
+    public static Task<object> Communities(
+        ICommunityContextService communityContext,
+        CancellationToken ct)
+        => communityContext.GetOverviewAsync(ct);
+
+    [McpServerTool(Name = "system.community_context")]
+    [Description("WHEN: deep-diving one domain community from system.communities. One LLM-sized chunk: member endpoints (risk-ordered, with condensed service/boundary dependency chains), services, boundaries, and cross-community seams. Hundreds-of-endpoints hosts stay tractable by reading one community at a time.\n\nResponse: { index, label, riskScore, endpoints:[{ id, area, purpose, risk, services[], boundaries[] }], services[], boundaries[], crossCommunity:[{communityIndex,label,sharedEdges,viaNodes[]}] }.")]
+    public static async Task<object> CommunityContext(
+        ICommunityContextService communityContext,
+        [Description("Community index from system.communities.")] int index,
+        CancellationToken ct)
+    {
+        var result = await communityContext.GetCommunityContextAsync(index, ct);
+        return result ?? new { error = $"No community with index {index}. Call system.communities first." };
+    }
+
     [McpServerTool(Name = "endpoint.callgraph")]
     [Description("WHEN: need the full call tree under an endpoint — every method, file:line, summary, signals. Use to trace 'what does this endpoint touch end-to-end'. Truncates by depth to keep payload manageable.\n\nResponse: { endpointId, rootMethod, generatedAt, truncated, rootCall:CallNode } where CallNode = { displayName, declaringType, methodName, kind, resolvedImpl, filePath, line, endLine, summary, signals, calls[] }.")]
     public static async Task<object> CallGraph(

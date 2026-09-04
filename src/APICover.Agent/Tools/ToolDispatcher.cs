@@ -5,6 +5,7 @@ using APICover.Abstractions.Models;
 using APICover.Abstractions.Services;
 using APICover.Abstractions.Validation;
 using APICover.Agent.Memory;
+using APICover.Discovery.CallGraph;
 
 namespace APICover.Agent.Tools;
 
@@ -19,18 +20,20 @@ public sealed class ToolDispatcher
     private readonly IAgentMemoryStore _memory;
     private readonly IScenarioStore _scenarios;
     private readonly ICustomToolInvoker? _customInvoker;
+    private readonly ICommunityContextService? _communities;
 
     private static readonly JsonSerializerOptions ScenarioJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory, IScenarioStore scenarios, ICustomToolInvoker? customInvoker = null)
+    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory, IScenarioStore scenarios, ICustomToolInvoker? customInvoker = null, ICommunityContextService? communities = null)
     {
         _discovery = discovery;
         _memory = memory;
         _scenarios = scenarios;
         _customInvoker = customInvoker;
+        _communities = communities;
     }
 
     public async Task<ToolResult> DispatchAsync(string toolName, JsonNode? input, CancellationToken cancellationToken)
@@ -47,6 +50,8 @@ public sealed class ToolDispatcher
                 ToolRegistry.AppendMemory => await HandleAppendMemoryAsync(input, cancellationToken),
                 ToolRegistry.DeleteMemory => await HandleDeleteMemoryAsync(input, cancellationToken),
                 ToolRegistry.SaveScenario => await HandleSaveScenarioAsync(input, cancellationToken),
+                ToolRegistry.GetCommunities => await HandleGetCommunitiesAsync(cancellationToken),
+                ToolRegistry.GetCommunityContext => await HandleGetCommunityContextAsync(input, cancellationToken),
                 _ => null
             };
 
@@ -70,6 +75,31 @@ public sealed class ToolDispatcher
                 JsonValue.Create($"{ex.GetType().Name}: {ex.Message}")!,
                 IsError: true);
         }
+    }
+
+    private async Task<JsonNode> HandleGetCommunitiesAsync(CancellationToken cancellationToken)
+    {
+        if (_communities is null)
+        {
+            return JsonValue.Create("Community context unavailable — call AddAPICover() before AddAPICoverAgent().")!;
+        }
+        var overview = await _communities.GetOverviewAsync(cancellationToken);
+        return JsonSerializer.SerializeToNode(overview, ScenarioJsonOptions)!;
+    }
+
+    private async Task<JsonNode> HandleGetCommunityContextAsync(JsonNode? input, CancellationToken cancellationToken)
+    {
+        if (_communities is null)
+        {
+            return JsonValue.Create("Community context unavailable — call AddAPICover() before AddAPICoverAgent().")!;
+        }
+        var index = input?["index"]?.GetValue<int>() ?? -1;
+        var context = await _communities.GetCommunityContextAsync(index, cancellationToken);
+        if (context is null)
+        {
+            return JsonValue.Create($"No community with index {index}. Call get_communities first.")!;
+        }
+        return JsonSerializer.SerializeToNode(context, ScenarioJsonOptions)!;
     }
 
     private JsonNode HandleListEndpoints(JsonNode? input)

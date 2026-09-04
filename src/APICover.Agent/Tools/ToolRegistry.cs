@@ -18,6 +18,8 @@ public static class ToolRegistry
     public const string AppendMemory = "append_memory";
     public const string DeleteMemory = "delete_memory";
     public const string SaveScenario = "save_scenario";
+    public const string GetCommunities = "get_communities";
+    public const string GetCommunityContext = "get_community_context";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
 
@@ -211,6 +213,38 @@ public static class ToolRegistry
                       "type": "object",
                       "description": "Full Scenario JSON document. See tool description for shape and example."
                     }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = GetCommunities,
+                Description =
+                    "Table of contents of the host system: structurally-detected domain "
+                  + "communities (users, invoicing, …) ordered by risk, with endpoint counts "
+                  + "and cross-community links. Call this FIRST when asked to understand the "
+                  + "system, infer scenarios, or hunt bugs — then work community-by-community "
+                  + "via get_community_context instead of pulling the whole surface at once. "
+                  + "Cross-community links are where integrated UI journeys live.",
+                InputSchema = JsonNode.Parse("""{ "type": "object", "properties": {} }""")!
+            },
+            new ToolDefinition
+            {
+                Name = GetCommunityContext,
+                Description =
+                    "One LLM-sized context chunk for a single domain community: member "
+                  + "endpoints (risk-ordered, each with its condensed service/boundary "
+                  + "dependency chain), services, boundaries, and cross-community seams. "
+                  + "Shared services between endpoints imply shared state — mutations via one "
+                  + "endpoint are observable through its siblings. Use get_endpoint_details "
+                  + "only for endpoints you actually plan to put in a scenario.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["index"],
+                  "properties": {
+                    "index": { "type": "integer", "description": "Community index from get_communities." }
                   }
                 }
                 """)!

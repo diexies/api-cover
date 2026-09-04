@@ -90,6 +90,7 @@ public static class APICoverServiceCollectionExtensions
         services.TryAddSingleton<IServiceCatalogService, ServiceCatalogService>();
         services.TryAddSingleton<IServiceMapService, ServiceMapBuilder>();
         services.TryAddSingleton<IReverseCallIndexService, ReverseCallIndexService>();
+        services.TryAddSingleton<ICommunityContextService, CommunityContextService>();
         services.AddHostedService<CallGraphWarmupHostedService>();
 
         return services;
