@@ -50,6 +50,8 @@ public static class AgentEndpoints
             return Results.Json(new
             {
                 mode = stored?.Mode.ToString() ?? "Disabled",
+                provider = (stored?.Provider ?? AgentProvider.Anthropic).ToString(),
+                model = stored?.Model,
                 hasApiKey = !string.IsNullOrEmpty(stored?.EncryptedApiKey),
                 lastFourChars = stored?.LastFourChars,
                 dailyDollarCap = stored?.DailyDollarCap,
@@ -85,6 +87,8 @@ public static class AgentEndpoints
 
             string? apiKey = null;
             decimal? cap = null;
+            var provider = AgentProvider.Anthropic;
+            string? model = null;
             if (mode == AgentCredentialMode.ApiKey)
             {
                 apiKey = root.TryGetProperty("apiKey", out var keyEl) && keyEl.ValueKind == JsonValueKind.String
@@ -101,6 +105,13 @@ public static class AgentEndpoints
                 {
                     return Results.BadRequest(new { error = "Field 'dailyDollarCap' is required (positive number) when mode=ApiKey." });
                 }
+                if (root.TryGetProperty("provider", out var provEl) && provEl.ValueKind == JsonValueKind.String
+                    && !Enum.TryParse(provEl.GetString(), ignoreCase: true, out provider))
+                {
+                    return Results.BadRequest(new { error = "Invalid 'provider'. Expected Anthropic or OpenAI." });
+                }
+                model = root.TryGetProperty("model", out var modelEl) && modelEl.ValueKind == JsonValueKind.String
+                    ? modelEl.GetString() : null;
             }
 
             var record = new StoredCredential(
@@ -108,10 +119,12 @@ public static class AgentEndpoints
                 EncryptedApiKey: apiKey is null ? null : encryption.Protect(apiKey),
                 LastFourChars: apiKey is null ? null : CredentialEncryption.LastFour(apiKey),
                 DailyDollarCap: cap,
-                UpdatedAt: DateTimeOffset.UtcNow);
+                UpdatedAt: DateTimeOffset.UtcNow,
+                Provider: provider,
+                Model: string.IsNullOrWhiteSpace(model) ? null : model.Trim());
 
             await store.SaveAsync(record);
-            return Results.Json(new { ok = true, mode = mode.ToString() }, Json);
+            return Results.Json(new { ok = true, mode = mode.ToString(), provider = provider.ToString(), model }, Json);
         });
 
         agent.MapDelete("/credentials", async (IAgentCredentialStore store) =>

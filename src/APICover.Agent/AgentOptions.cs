@@ -35,6 +35,14 @@ public sealed class AgentOptions
     /// <summary>Anthropic API base URL. Override only for testing against a stub.</summary>
     public Uri AnthropicBaseAddress { get; set; } = new("https://api.anthropic.com/");
 
+    /// <summary>OpenAI-compatible API base. Point at any gateway speaking the Chat
+    /// Completions dialect to use other vendors.</summary>
+    public Uri OpenAiBaseAddress { get; set; } = new("https://api.openai.com/");
+
+    /// <summary>Default model when the credential's provider is OpenAI and no per-credential
+    /// model override is set. Codex-class coding models slot in here (e.g. "gpt-5-codex").</summary>
+    public string OpenAiModel { get; set; } = "gpt-5";
+
     /// <summary>Anthropic API version header sent on every request.</summary>
     public string AnthropicVersion { get; set; } = "2023-06-01";
 

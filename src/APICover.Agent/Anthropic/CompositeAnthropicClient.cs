@@ -1,4 +1,5 @@
 using APICover.Agent.Credentials;
+using APICover.Agent.OpenAi;
 
 namespace APICover.Agent.Anthropic;
 
@@ -11,15 +12,18 @@ internal sealed class CompositeAnthropicClient : IAnthropicClient
 {
     private readonly IClaudeCredentialProvider _credentials;
     private readonly AnthropicHttpClient _http;
+    private readonly OpenAiHttpClient _openai;
     private readonly ClaudeCliBridge _cli;
 
     public CompositeAnthropicClient(
         IClaudeCredentialProvider credentials,
         AnthropicHttpClient http,
+        OpenAiHttpClient openai,
         ClaudeCliBridge cli)
     {
         _credentials = credentials;
         _http = http;
+        _openai = openai;
         _cli = cli;
     }
 
@@ -28,6 +32,7 @@ internal sealed class CompositeAnthropicClient : IAnthropicClient
         var credential = await _credentials.GetAsync(cancellationToken);
         return credential switch
         {
+            ApiKeyCredential { Provider: AgentProvider.OpenAI } => await _openai.SendAsync(request, cancellationToken),
             ApiKeyCredential => await _http.SendAsync(request, cancellationToken),
             MaxSubscriptionCredential => await _cli.SendAsync(request, cancellationToken),
             _ => throw new InvalidOperationException($"Unhandled credential type: {credential.GetType().Name}")

@@ -22,7 +22,9 @@ public sealed record StoredCredential(
     string? EncryptedApiKey,
     string? LastFourChars,
     decimal? DailyDollarCap,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    AgentProvider Provider = AgentProvider.Anthropic,
+    string? Model = null);
 
 public enum AgentCredentialMode
 {

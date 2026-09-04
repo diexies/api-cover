@@ -7,6 +7,7 @@ using APICover.Agent.Credentials;
 using APICover.Agent.Endpoints;
 using APICover.Agent.Engine;
 using APICover.Agent.Memory;
+using APICover.Agent.OpenAi;
 using APICover.Agent.Sessions;
 using APICover.Agent.Tools;
 using APICover.Hosting;
@@ -53,6 +54,10 @@ public static class APICoverAgentServiceCollectionExtensions
             sp.GetRequiredService<IHttpClientFactory>(),
             sp.GetRequiredService<IClaudeCredentialProvider>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AgentOptions>>()));
+        services.TryAddSingleton<OpenAiHttpClient>(sp => new OpenAiHttpClient(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<IClaudeCredentialProvider>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AgentOptions>>()));
         services.TryAddSingleton<ClaudeCliBridge>();
         services.TryAddSingleton<IAnthropicClient, CompositeAnthropicClient>();
 
@@ -72,6 +77,13 @@ public static class APICoverAgentServiceCollectionExtensions
             {
                 var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AgentOptions>>().Value;
                 client.BaseAddress = opts.AnthropicBaseAddress;
+                client.Timeout = TimeSpan.FromSeconds(opts.RequestTimeoutSeconds);
+            });
+        services.AddHttpClient(OpenAiHttpClient.HttpClientName)
+            .ConfigureHttpClient((sp, client) =>
+            {
+                var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AgentOptions>>().Value;
+                client.BaseAddress = opts.OpenAiBaseAddress;
                 client.Timeout = TimeSpan.FromSeconds(opts.RequestTimeoutSeconds);
             });
 

@@ -62,7 +62,7 @@ internal sealed class CredentialResolver : IClaudeCredentialProvider
                 throw new InvalidOperationException("API-key credential present but key is empty.");
             }
             var key = _encryption.Unprotect(stored.EncryptedApiKey);
-            return new ApiKeyCredential(key, stored.DailyDollarCap);
+            return new ApiKeyCredential(key, stored.DailyDollarCap, stored.Provider, stored.Model);
         }
 
         throw new InvalidOperationException($"Unknown credential mode: {stored.Mode}.");
