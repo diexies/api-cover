@@ -63,8 +63,26 @@ public sealed class FilesystemScenarioStore : IScenarioStore
         scenario.UpdatedAt = DateTimeOffset.UtcNow;
         _cache[scenario.Id] = scenario;
         var path = PathFor(scenario.Id);
-        await using var fs = File.Create(path);
-        await JsonSerializer.SerializeAsync(fs, scenario, JsonOptions, cancellationToken).ConfigureAwait(false);
+        // Write-to-temp + rename: concurrent writers (parallel hosts sharing one content
+        // root, e.g. test fixtures) never contend on the same open handle — Linux enforces
+        // FileShare via flock and File.Create on a shared path throws IOException there.
+        // Rename is atomic on the same filesystem, so readers also never see a torn file.
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var fs = File.Create(tmp))
+            {
+                await JsonSerializer.SerializeAsync(fs, scenario, JsonOptions, cancellationToken).ConfigureAwait(false);
+            }
+            File.Move(tmp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tmp))
+            {
+                try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+            }
+        }
     }
 
     public Task DeleteAsync(string id, CancellationToken cancellationToken = default)

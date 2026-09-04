@@ -65,8 +65,24 @@ public sealed class FilesystemCustomToolStore : ICustomToolStore
         definition.UpdatedAt = now;
         _cache[definition.Name] = definition;
         var path = PathFor(definition.Name);
-        await using var fs = File.Create(path);
-        await JsonSerializer.SerializeAsync(fs, definition, JsonOptions, cancellationToken).ConfigureAwait(false);
+        // Temp + rename — see FilesystemScenarioStore.SaveAsync; flock on Linux makes
+        // concurrent File.Create on a shared path throw IOException.
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var fs = File.Create(tmp))
+            {
+                await JsonSerializer.SerializeAsync(fs, definition, JsonOptions, cancellationToken).ConfigureAwait(false);
+            }
+            File.Move(tmp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tmp))
+            {
+                try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+            }
+        }
     }
 
     public Task DeleteAsync(string name, CancellationToken cancellationToken = default)

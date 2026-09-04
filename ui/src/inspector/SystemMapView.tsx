@@ -40,6 +40,15 @@ const LARGE_GRAPH_TICK_BUDGET = 320;
 // Kinetic-energy threshold for auto-freeze. Below this, layout is "settled"
 // and we stop ticking until the user interacts.
 const SETTLE_KE_PER_NODE = 0.05;
+// LOD: below this zoom, per-node labels are unreadable anyway — skip their DOM
+// entirely. Labels are the single largest chunk of SVG elements on big maps.
+const LABEL_MIN_SCALE = 0.65;
+// Viewport-culling margin (world px) so nodes don't visibly pop at the edge mid-pan.
+const CULL_MARGIN = 100;
+// Spatial-hash cell for repulsion. At REPEL=8000 the pair force one cell away
+// (~170 px) is under 0.3 px/tick — below visual noise — so truncating repulsion
+// to neighbouring cells keeps the settled layout while dropping O(N²) to ~O(N).
+const GRID_CELL = 170;
 
 const RM_QUERY = '(prefers-reduced-motion: reduce)';
 
@@ -51,11 +60,15 @@ const KIND_LABEL: Record<ServiceMapNodeKind, string> = {
 };
 
 /**
- * Force-directed mesh of the entire call graph — Obsidian-style. Every endpoint /
- * service / external / database renders at once, with Coulomb-like repulsion
- * pushing nodes apart, springs attracting connected pairs, and a soft centre
- * gravity preventing the simulation from drifting to infinity. Drag a node to
- * pin it; wheel zooms with the cursor as pivot; drag empty canvas to pan.
+ * Force-directed mesh of the call graph — Obsidian-style. Coulomb-like repulsion
+ * pushes nodes apart, springs attract connected pairs, and a radial tier bias
+ * pulls each node to its BFS ring. Drag a node to pin it; wheel zooms with the
+ * cursor as pivot; drag empty canvas to pan.
+ *
+ * Large-graph strategy (>= LARGE_GRAPH_N nodes): ring-depth LOD opens the map at
+ * the deepest ring that fits the budget (▽/△ FAB widens it), labels drop below
+ * LABEL_MIN_SCALE zoom, off-viewport nodes/edges emit no DOM, repulsion runs on
+ * a spatial hash, and paints happen every 2nd frame while unsettled.
  *
  * Why a custom physics loop instead of D3-force or react-force-graph?
  *  - Zero new dependencies (UI bundle stays tight).
@@ -75,7 +88,29 @@ export function SystemMapView({
   width = 1000,
   height = 720,
 }: Props) {
-  const filtered = useMemo(() => filterMap(map, visibleKinds, search), [map, visibleKinds, search]);
+  const base = useMemo(() => filterBase(map, visibleKinds, search), [map, visibleKinds, search]);
+  // Ring-depth LOD ("heights"): large graphs open at the deepest ring that stays
+  // within the physics/DOM comfort budget; the user widens from there via the FAB.
+  const autoDepth = useMemo(() => {
+    if (base.nodes.length <= LARGE_GRAPH_N) return Number.POSITIVE_INFINITY;
+    const perRing = new Map<number, number>();
+    for (const n of base.nodes) {
+      const l = effLevel(n, base.maxLevel);
+      perRing.set(l, (perRing.get(l) ?? 0) + 1);
+    }
+    let cum = 0;
+    let depth = 1;
+    for (let l = 0; l <= base.maxLevel + 1; l++) {
+      cum += perRing.get(l) ?? 0;
+      if (cum > LARGE_GRAPH_N && l > 0) break;
+      depth = l;
+    }
+    return Math.max(1, depth);
+  }, [base]);
+  const [depthOverride, setDepthOverride] = useState<number | null>(null);
+  const maxDepth = base.maxLevel + 1;
+  const effectiveDepth = Math.min(depthOverride ?? autoDepth, maxDepth);
+  const filtered = useMemo(() => applyDepth(base, effectiveDepth), [base, effectiveDepth]);
   const nodeIds = useMemo(() => filtered.nodes.map((n) => n.id).join('|'), [filtered.nodes]);
 
   // ── Simulation state (refs — out-of-band of React render cycle) ────────
@@ -138,6 +173,7 @@ export function SystemMapView({
     // burning frames in idle. When ke per node falls below SETTLE_KE_PER_NODE
     // we stop both stepping and re-rendering until a drag/pan/wheel wakes us.
     let consecutiveSettled = 0;
+    let frame = 0;
     function loop() {
       if (runningRef.current && tickBudgetRef.current > 0) {
         const ke = step(filtered.nodes, filtered.edges, positionsRef.current, dragRef.current, width, height);
@@ -151,7 +187,12 @@ export function SystemMapView({
         } else {
           consecutiveSettled = 0;
         }
-        forceRender((n) => (n + 1) & 0xffff);
+        // Large graphs paint every 2nd frame — physics still steps every frame so
+        // settling speed is unchanged, but reconciler cost halves while unsettled.
+        frame++;
+        if (filtered.nodes.length < LARGE_GRAPH_N || (frame & 1) === 0 || tickBudgetRef.current <= 0) {
+          forceRender((n) => (n + 1) & 0xffff);
+        }
       }
       raf = requestAnimationFrame(loop);
     }
@@ -296,6 +337,14 @@ export function SystemMapView({
   const positions = positionsRef.current;
   const t = transformRef.current;
 
+  // LOD + viewport culling. Labels vanish below readable zoom (except the focused/
+  // selected node); nodes and edges fully outside the visible world rect emit no DOM.
+  const showLabels = t.scale >= LABEL_MIN_SCALE;
+  const cullL = (0 - t.tx) / t.scale - CULL_MARGIN;
+  const cullT = (0 - t.ty) / t.scale - CULL_MARGIN;
+  const cullR = (width - t.tx) / t.scale + CULL_MARGIN;
+  const cullB = (height - t.ty) / t.scale + CULL_MARGIN;
+
   return (
     <svg
       ref={svgRef}
@@ -324,6 +373,8 @@ export function SystemMapView({
             const a = positions.get(e.from);
             const b = positions.get(e.to);
             if (!a || !b) return null;
+            if (Math.max(a.x, b.x) < cullL || Math.min(a.x, b.x) > cullR ||
+                Math.max(a.y, b.y) < cullT || Math.min(a.y, b.y) > cullB) return null;
             const dim = focusNeighborhood && !(focusNeighborhood.has(e.from) && focusNeighborhood.has(e.to));
             const calls = Math.max(1, e.callSites ?? 1);
             const strokeWidth = Math.min(3.5, 0.9 + Math.log2(calls) * 0.6);
@@ -346,6 +397,7 @@ export function SystemMapView({
           {filtered.nodes.map((n) => {
             const p = positions.get(n.id);
             if (!p) return null;
+            if (p.x < cullL || p.x > cullR || p.y < cullT || p.y > cullB) return null;
             const isFocus = focusId === n.id;
             const inHalo = focusNeighborhood ? focusNeighborhood.has(n.id) : true;
             const isSelected = selectedId === n.id;
@@ -366,15 +418,17 @@ export function SystemMapView({
                 aria-label={`${KIND_LABEL[n.kind]} ${n.label}`}
               >
                 <NodeShape kind={n.kind} method={n.httpMethod} size={size} />
-                <text
-                  className={`sysmap-node-label${isFocus ? ' is-focus' : ''}`}
-                  x={0}
-                  y={size + 14}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                >
-                  {truncate(n.label, 26)}
-                </text>
+                {(showLabels || isFocus || isSelected) && (
+                  <text
+                    className={`sysmap-node-label${isFocus ? ' is-focus' : ''}`}
+                    x={0}
+                    y={size + 14}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    {truncate(n.label, 26)}
+                  </text>
+                )}
               </g>
             );
           })}
@@ -387,6 +441,23 @@ export function SystemMapView({
         <FabButton x={32} label="+" onClick={() => zoomBy(transformRef, svgRef.current, 1.2, forceRender)} title="zoom in" />
         <FabButton x={64} label="⌖" onClick={() => { transformRef.current = { tx: 0, ty: 0, scale: 1 }; forceRender((n) => (n + 1) & 0xffff); }} title="recenter" />
       </g>
+
+      {/* Ring-depth controls — how many BFS rings ("heights") are rendered. */}
+      {maxDepth > 1 && (
+        <g className="sysmap-fab" transform={`translate(${width - 110}, ${height - 74})`}>
+          <FabButton x={0}  label="▽" onClick={() => setDepthOverride(Math.max(1, effectiveDepth - 1))} title="fewer rings" />
+          <FabButton x={32} label="△" onClick={() => setDepthOverride(Math.min(maxDepth, effectiveDepth + 1))} title="more rings" />
+          <text x={78} y={15} textAnchor="middle" dominantBaseline="middle" className="sysmap-fab-text">
+            {`${effectiveDepth}/${maxDepth}`}
+          </text>
+        </g>
+      )}
+
+      {filtered.nodes.length < base.nodes.length && (
+        <text x={12} y={height - 12} className="sysmap-node-label" opacity={0.75}>
+          {`${filtered.nodes.length}/${base.nodes.length} nodes · ring depth ${effectiveDepth}/${maxDepth}`}
+        </text>
+      )}
     </svg>
   );
 }
@@ -413,18 +484,36 @@ function step(
     if (p) arr.push({ id: n.id, p, level: n.level });
   }
 
-  // 1. Repulsion (pairwise).
+  // 1. Repulsion — spatial hash: only pairs within neighbouring cells interact.
+  // Force one cell away (~GRID_CELL px) is below visual noise at REPEL=8000, so
+  // truncation keeps the settled layout while dropping O(N²) to roughly O(N).
+  const grid = new Map<number, number[]>();
   for (let i = 0; i < arr.length; i++) {
-    for (let j = i + 1; j < arr.length; j++) {
-      const a = arr[i].p; const b = arr[j].p;
-      const dx = b.x - a.x; const dy = b.y - a.y;
-      const d2 = Math.max(EPS, dx * dx + dy * dy);
-      const inv = 1 / Math.sqrt(d2);
-      const f = REPEL / d2;
-      const fx = f * dx * inv;
-      const fy = f * dy * inv;
-      a.vx -= fx; a.vy -= fy;
-      b.vx += fx; b.vy += fy;
+    const key = cellKey(arr[i].p.x, arr[i].p.y);
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(i); else grid.set(key, [i]);
+  }
+  for (let i = 0; i < arr.length; i++) {
+    const a = arr[i].p;
+    const cx0 = Math.floor(a.x / GRID_CELL);
+    const cy0 = Math.floor(a.y / GRID_CELL);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const bucket = grid.get(packCell(cx0 + ox, cy0 + oy));
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (j <= i) continue;
+          const b = arr[j].p;
+          const dx = b.x - a.x; const dy = b.y - a.y;
+          const d2 = Math.max(EPS, dx * dx + dy * dy);
+          const inv = 1 / Math.sqrt(d2);
+          const f = REPEL / d2;
+          const fx = f * dx * inv;
+          const fy = f * dy * inv;
+          a.vx -= fx; a.vy -= fy;
+          b.vx += fx; b.vy += fy;
+        }
+      }
     }
   }
 
@@ -543,7 +632,13 @@ function FabButton({ x, label, onClick, title }: { x: number; label: string; onC
 
 /* ─── Filtering & utils ──────────────────────────────────────────────────── */
 
-function filterMap(map: ServiceMap, kinds: ReadonlySet<ServiceMapNodeKind>, search: string) {
+interface BaseGraph {
+  nodes: ServiceMapNode[];
+  edges: ServiceMapEdge[];
+  maxLevel: number;
+}
+
+function filterBase(map: ServiceMap, kinds: ReadonlySet<ServiceMapNodeKind>, search: string): BaseGraph {
   const q = search.trim().toLowerCase();
   const allow = (n: ServiceMapNode) => {
     if (n.isIsolated) return false;
@@ -555,7 +650,23 @@ function filterMap(map: ServiceMap, kinds: ReadonlySet<ServiceMapNodeKind>, sear
   const nodes = map.nodes.filter(allow);
   const ids = new Set(nodes.map((n) => n.id));
   const edges = map.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+  const maxLevel = Math.max(0, ...nodes.map((n) => Math.max(0, n.level)));
+  return { nodes, edges, maxLevel };
+}
+
+// Ring-depth LOD: keep only nodes whose BFS ring sits within `depth`. Unreachable
+// nodes (level < 0) live one past the outermost ring, so they are the first thing
+// a tighter depth folds away.
+function applyDepth(base: BaseGraph, depth: number) {
+  if (!Number.isFinite(depth)) return { nodes: base.nodes, edges: base.edges };
+  const nodes = base.nodes.filter((n) => effLevel(n, base.maxLevel) <= depth);
+  const ids = new Set(nodes.map((n) => n.id));
+  const edges = base.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
   return { nodes, edges };
+}
+
+function effLevel(n: ServiceMapNode, maxLevel: number): number {
+  return n.level >= 0 ? n.level : maxLevel + 1;
 }
 
 function clientToWorld(
@@ -609,6 +720,16 @@ function zoomBy(
 
 function clamp(v: number, lo: number, hi: number) {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+// Packed cell coordinates for the repulsion spatial hash. Collision-free while
+// |cellY| < 50000 (world y < ~8.5M px — far beyond any layout).
+function packCell(cx: number, cy: number): number {
+  return cx * 100000 + cy;
+}
+
+function cellKey(x: number, y: number): number {
+  return packCell(Math.floor(x / GRID_CELL), Math.floor(y / GRID_CELL));
 }
 
 function truncate(s: string, max: number): string {

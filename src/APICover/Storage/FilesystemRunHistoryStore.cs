@@ -143,8 +143,24 @@ public sealed class FilesystemRunHistoryStore : IRunStore
         }
 
         var file = Path.Combine(dir, $"r{nextIdx}.json");
-        await using var fs = File.Create(file);
-        await JsonSerializer.SerializeAsync(fs, run, JsonOptions, ct).ConfigureAwait(false);
+        // Temp + rename — parallel hosts sharing a content root contend on the same path,
+        // and Linux enforces FileShare via flock (File.Create on a shared path throws).
+        var tmp = $"{file}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var fs = File.Create(tmp))
+            {
+                await JsonSerializer.SerializeAsync(fs, run, JsonOptions, ct).ConfigureAwait(false);
+            }
+            File.Move(tmp, file, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tmp))
+            {
+                try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+            }
+        }
     }
 
     private static string SafeId(string id) =>
