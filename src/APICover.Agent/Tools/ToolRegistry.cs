@@ -20,6 +20,7 @@ public static class ToolRegistry
     public const string SaveScenario = "save_scenario";
     public const string GetCommunities = "get_communities";
     public const string GetCommunityContext = "get_community_context";
+    public const string RunScenario = "run_scenario";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
 
@@ -245,6 +246,28 @@ public static class ToolRegistry
                   "required": ["index"],
                   "properties": {
                     "index": { "type": "integer", "description": "Community index from get_communities." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = RunScenario,
+                Description =
+                    "Execute a saved scenario against the live host and wait for the result. "
+                  + "Returns a condensed verdict: run status, per-branch leaf counts, and "
+                  + "every failed node with its branch path, HTTP status and error — enough "
+                  + "to triage without pulling the full trace. Use after save_scenario to "
+                  + "verify the flow actually works, and in QA mode to hunt for bugs. "
+                  + "Branched scenarios (caseSets) report one entry per failed branch, so a "
+                  + "variant that breaks shows up with its exact variant path.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": { "type": "string", "description": "Scenario id (kebab-case) previously saved." },
+                    "timeoutSeconds": { "type": "integer", "description": "Max seconds to wait for completion (default 90, max 300)." }
                   }
                 }
                 """)!

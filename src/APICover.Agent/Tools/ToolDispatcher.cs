@@ -21,19 +21,30 @@ public sealed class ToolDispatcher
     private readonly IScenarioStore _scenarios;
     private readonly ICustomToolInvoker? _customInvoker;
     private readonly ICommunityContextService? _communities;
+    private readonly IScenarioEngine? _engine;
+    private readonly IRunStore? _runs;
 
     private static readonly JsonSerializerOptions ScenarioJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public ToolDispatcher(IEndpointDiscoveryService discovery, IAgentMemoryStore memory, IScenarioStore scenarios, ICustomToolInvoker? customInvoker = null, ICommunityContextService? communities = null)
+    public ToolDispatcher(
+        IEndpointDiscoveryService discovery,
+        IAgentMemoryStore memory,
+        IScenarioStore scenarios,
+        ICustomToolInvoker? customInvoker = null,
+        ICommunityContextService? communities = null,
+        IScenarioEngine? engine = null,
+        IRunStore? runs = null)
     {
         _discovery = discovery;
         _memory = memory;
         _scenarios = scenarios;
         _customInvoker = customInvoker;
         _communities = communities;
+        _engine = engine;
+        _runs = runs;
     }
 
     public async Task<ToolResult> DispatchAsync(string toolName, JsonNode? input, CancellationToken cancellationToken)
@@ -52,6 +63,7 @@ public sealed class ToolDispatcher
                 ToolRegistry.SaveScenario => await HandleSaveScenarioAsync(input, cancellationToken),
                 ToolRegistry.GetCommunities => await HandleGetCommunitiesAsync(cancellationToken),
                 ToolRegistry.GetCommunityContext => await HandleGetCommunityContextAsync(input, cancellationToken),
+                ToolRegistry.RunScenario => await HandleRunScenarioAsync(input, cancellationToken),
                 _ => null
             };
 
@@ -76,6 +88,74 @@ public sealed class ToolDispatcher
                 IsError: true);
         }
     }
+
+    private async Task<JsonNode> HandleRunScenarioAsync(JsonNode? input, CancellationToken cancellationToken)
+    {
+        if (_engine is null || _runs is null)
+        {
+            return JsonValue.Create("Scenario execution unavailable — engine not registered.")!;
+        }
+        var id = input?["id"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrEmpty(id))
+        {
+            return JsonValue.Create("Required field 'id' is missing.")!;
+        }
+        var scenario = await _scenarios.GetAsync(id, cancellationToken);
+        if (scenario is null)
+        {
+            return JsonValue.Create($"No scenario with id '{id}'. Call save_scenario first.")!;
+        }
+
+        var timeout = Math.Clamp(input?["timeoutSeconds"]?.GetValue<int>() ?? 90, 5, 300);
+        var started = await _engine.StartAsync(scenario, new RunOptions { BreakpointsEnabled = false }, cancellationToken);
+
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(timeout);
+        Run run = started;
+        while (run.Status is RunStatus.Pending or RunStatus.Running or RunStatus.Paused)
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                return JsonSerializer.SerializeToNode(new
+                {
+                    runId = started.Id,
+                    status = "timeout",
+                    detail = $"Run did not finish within {timeout}s. Inspect it in the UI or retry with a larger timeoutSeconds.",
+                }, ScenarioJsonOptions)!;
+            }
+            await Task.Delay(500, cancellationToken);
+            run = await _runs.GetAsync(started.Id, cancellationToken) ?? run;
+        }
+
+        var failed = run.NodeResults
+            .Where(r => r.Status is NodeStatus.Failed or NodeStatus.Cancelled)
+            .Select(r => new
+            {
+                nodeId = r.NodeId,
+                branchPath = r.BranchPath,
+                status = r.Status.ToString(),
+                httpStatus = r.Response?.Status,
+                error = r.Error,
+                responseBodySample = Truncate(r.Response?.Body?.ToJsonString(), 400),
+            })
+            .ToArray();
+
+        return JsonSerializer.SerializeToNode(new
+        {
+            runId = run.Id,
+            status = run.Status.ToString(),
+            error = run.Error,
+            totalNodeResults = run.NodeResults.Count,
+            succeeded = run.NodeResults.Count(r => r.Status == NodeStatus.Succeeded),
+            failedCount = failed.Length,
+            failed,
+            hint = failed.Length > 0
+                ? "Triage each failure: 5xx = suspected server bug; unexpected 2xx on invalid input = validation gap; created-but-not-readable = read-after-write violation. Record real findings to memory under findings/."
+                : "All branches passed. If variants were meant to be rejected (4xx) but show succeeded here, check whether the API accepted invalid input — that is a finding too.",
+        }, ScenarioJsonOptions)!;
+    }
+
+    private static string? Truncate(string? s, int max)
+        => s is null ? null : s.Length <= max ? s : s[..max] + "…";
 
     private async Task<JsonNode> HandleGetCommunitiesAsync(CancellationToken cancellationToken)
     {

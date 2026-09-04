@@ -16,7 +16,8 @@ public enum AgentRunMode
     Chat = 0,
     Scan = 1,
     ScenarioGen = 2,
-    ScenarioInfer = 3
+    ScenarioInfer = 3,
+    Qa = 4
 }
 
 /// <summary>
@@ -183,6 +184,45 @@ public sealed class AgentRunCoordinator
       + "   - ISO timestamp + community count + endpoint count (staleness check)\n"
       + "5. Maintain `index.md` after every write — one line per file with a read-when hook.\n"
       + "6. STOP. Do not produce conversational output — your work is the memory files.\n";
+
+    private const string QaModeTail =
+        "## Mode: qa (autonomous quality sweep)\n\n"
+      + "Your job: predict how a UI consumes this API, prove the flows work, derive "
+      + "exceptional cases, and surface suspected bugs — WITHOUT the user explaining the "
+      + "system. Five phases, in order:\n\n"
+      + "PHASE 1 — UNDERSTAND.\n"
+      + "`list_memory` first. If `system.md` and `communities/` cards exist, read them and "
+      + "skip rediscovery. Otherwise `get_communities`, then `get_community_context` for "
+      + "the top 2-3 risk-ranked communities. Infer the domain from names, schemas and "
+      + "chains — the project can be any domain; never ask the user what it does.\n\n"
+      + "PHASE 2 — JOURNEYS.\n"
+      + "Predict 3-6 integrated UI journeys. Prioritise: (a) cross-community seams — those "
+      + "are integrated flows (e.g. create user → invoice them → pay); (b) endpoints "
+      + "sharing downstream services — shared state means write-then-read pairs; (c) CRUD "
+      + "lifecycles. Name each journey and its data handoffs.\n\n"
+      + "PHASE 3 — SCENARIOS + EXCEPTIONAL CASES.\n"
+      + "For each journey build ONE scenario via `save_scenario`: sequential DAG, single "
+      + "start node, JSONLogic handoffs (`{\"var\":\"nodes.<id>.response.body.<field>\"}`), "
+      + "read-after-write verification after every mutation. Then attach `caseSets` on "
+      + "1-2 critical nodes — variants for: invalid input (wrong type, empty, oversized), "
+      + "boundary values (0, negative, huge), nonexistent ids, duplicate submission. Label "
+      + "every variant with expected behaviour, e.g. \"neg-amount (expect 4xx)\". Cap "
+      + "total branches: estimator rejects runs over the cap — keep variants focused.\n\n"
+      + "PHASE 4 — RUN + TRIAGE.\n"
+      + "`run_scenario` each saved scenario. Triage every failed branch AND every "
+      + "suspicious success: 5xx anywhere = suspected server bug; 2xx for a variant "
+      + "labelled 'expect 4xx' = validation gap; create succeeded but read-back failed = "
+      + "state consistency bug; timeout = hang suspect. A 4xx on an 'expect 4xx' variant "
+      + "counts as run FAILED by engine rules but is CORRECT behaviour — do not report "
+      + "it as a bug; note it as verified rejection.\n\n"
+      + "PHASE 5 — FINDINGS.\n"
+      + "For each confirmed suspicion write `findings/<slug>.md` via `write_memory`: "
+      + "severity (high/medium/low), endpoint, repro scenario id + variant path, evidence "
+      + "(HTTP status + error + body sample), hypothesis of root cause, suggested check. "
+      + "Update `index.md`. Finish with a SHORT report to the user: journeys covered, "
+      + "scenarios saved, branch counts, findings by severity — and nothing else.\n\n"
+      + "Hard rules: never invent endpoints; never delete scenarios; findings must cite "
+      + "real run evidence, not speculation.\n";
 
     private readonly IAnthropicClient _anthropic;
     private readonly ToolDispatcher _tools;
@@ -691,6 +731,7 @@ public sealed class AgentRunCoordinator
             AgentRunMode.Scan => ScanModeTail,
             AgentRunMode.ScenarioGen => ScenarioGenModeTail,
             AgentRunMode.ScenarioInfer => ScenarioInferModeTail,
+            AgentRunMode.Qa => QaModeTail,
             _ => ChatModeTail
         };
         // Scenario modes do not benefit from the memory index — skip the bloat.

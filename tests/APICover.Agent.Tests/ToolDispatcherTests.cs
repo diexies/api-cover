@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using APICover.Abstractions.Discovery;
+using APICover.Abstractions.Models;
+using APICover.Abstractions.Services;
 using APICover.Agent.Memory;
 using APICover.Agent.Tools;
 
@@ -77,6 +79,59 @@ public class ToolDispatcherTests
         Assert.True(result.IsError);
     }
 
+    [Fact]
+    public async Task RunScenario_ReturnsCondensedVerdict_WithFailedBranches()
+    {
+        var scenarios = new APICover.Storage.InMemoryScenarioStore();
+        await scenarios.SaveAsync(new Scenario { Id = "checkout", Name = "Checkout" });
+        var runs = new APICover.Storage.InMemoryRunStore();
+        var engine = new FakeEngine(runs, finalStatus: RunStatus.Failed, results: new[]
+        {
+            MakeResult("create", new[] { "a1" }, NodeStatus.Succeeded, 201),
+            MakeResult("create", new[] { "a2" }, NodeStatus.Failed, 500, "Internal Server Error"),
+        });
+        var dispatcher = new ToolDispatcher(
+            new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), scenarios,
+            engine: engine, runs: runs);
+
+        var result = await dispatcher.DispatchAsync(
+            ToolRegistry.RunScenario, new JsonObject { ["id"] = "checkout" }, default);
+
+        Assert.False(result.IsError);
+        Assert.Equal("Failed", result.Output["status"]!.GetValue<string>());
+        Assert.Equal(1, result.Output["failedCount"]!.GetValue<int>());
+        var failure = result.Output["failed"]!.AsArray()[0]!;
+        Assert.Equal("create", failure["nodeId"]!.GetValue<string>());
+        Assert.Equal("a2", failure["branchPath"]!.AsArray()[0]!.GetValue<string>());
+        Assert.Equal(500, failure["httpStatus"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task RunScenario_UnknownId_ReturnsGuidance()
+    {
+        var runs = new APICover.Storage.InMemoryRunStore();
+        var dispatcher = new ToolDispatcher(
+            new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(),
+            new APICover.Storage.InMemoryScenarioStore(),
+            engine: new FakeEngine(runs, RunStatus.Succeeded, Array.Empty<NodeResult>()),
+            runs: runs);
+
+        var result = await dispatcher.DispatchAsync(
+            ToolRegistry.RunScenario, new JsonObject { ["id"] = "ghost" }, default);
+
+        Assert.False(result.IsError);
+        Assert.Contains("save_scenario", result.Output.ToJsonString());
+    }
+
+    private static NodeResult MakeResult(string nodeId, string[] branch, NodeStatus status, int httpStatus, string? error = null) => new()
+    {
+        NodeId = nodeId,
+        BranchPath = branch.ToList(),
+        Status = status,
+        Response = new ResponseSnapshot { Status = httpStatus },
+        Error = error,
+    };
+
     private static IReadOnlyList<EndpointDescriptor> SampleEndpoints() => new[]
     {
         new EndpointDescriptor { Id = "GET /users", Method = "GET", Path = "/users", Area = "user" },
@@ -89,5 +144,25 @@ public class ToolDispatcherTests
         private readonly IReadOnlyList<EndpointDescriptor> _endpoints;
         public FakeDiscovery(IReadOnlyList<EndpointDescriptor> endpoints) { _endpoints = endpoints; }
         public IReadOnlyList<EndpointDescriptor> GetEndpoints() => _endpoints;
+    }
+
+    private sealed class FakeEngine : IScenarioEngine
+    {
+        private readonly APICover.Storage.InMemoryRunStore _runs;
+        private readonly RunStatus _finalStatus;
+        private readonly IReadOnlyList<NodeResult> _results;
+        public FakeEngine(APICover.Storage.InMemoryRunStore runs, RunStatus finalStatus, IReadOnlyList<NodeResult> results)
+        {
+            _runs = runs;
+            _finalStatus = finalStatus;
+            _results = results;
+        }
+        public async Task<Run> StartAsync(Scenario scenario, RunOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var run = new Run { Id = "run-1", ScenarioId = scenario.Id, Status = _finalStatus };
+            foreach (var r in _results) run.NodeResults.Add(r);
+            await _runs.SaveAsync(run, cancellationToken);
+            return run;
+        }
     }
 }
