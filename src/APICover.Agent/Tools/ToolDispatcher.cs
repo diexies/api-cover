@@ -65,6 +65,7 @@ public sealed class ToolDispatcher
                 ToolRegistry.GetCommunityContext => await HandleGetCommunityContextAsync(input, cancellationToken),
                 ToolRegistry.RunScenario => await HandleRunScenarioAsync(input, cancellationToken),
                 ToolRegistry.GetDirtyCommunities => await HandleGetDirtyCommunitiesAsync(input, cancellationToken),
+                ToolRegistry.ListScenarios => await HandleListScenariosAsync(cancellationToken),
                 _ => null
             };
 
@@ -157,6 +158,22 @@ public sealed class ToolDispatcher
 
     private static string? Truncate(string? s, int max)
         => s is null ? null : s.Length <= max ? s : s[..max] + "…";
+
+    private async Task<JsonNode> HandleListScenariosAsync(CancellationToken cancellationToken)
+    {
+        var scenarios = await _scenarios.ListAsync(cancellationToken);
+        var items = scenarios.Select(s => new
+        {
+            id = s.Id,
+            name = s.Name,
+            description = Truncate(s.Description, 240),
+            tags = s.Tags,
+            nodeChain = s.Nodes.Select(n => $"{n.Method} {n.Path}").ToArray(),
+            caseSetCount = s.CaseSets.Count,
+            updatedAt = s.UpdatedAt,
+        }).ToArray();
+        return JsonSerializer.SerializeToNode(new { count = items.Length, scenarios = items }, ScenarioJsonOptions)!;
+    }
 
     private async Task<JsonNode> HandleGetDirtyCommunitiesAsync(JsonNode? input, CancellationToken cancellationToken)
     {

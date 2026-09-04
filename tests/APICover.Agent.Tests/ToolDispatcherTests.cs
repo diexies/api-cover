@@ -123,6 +123,34 @@ public class ToolDispatcherTests
         Assert.Contains("save_scenario", result.Output.ToJsonString());
     }
 
+    [Fact]
+    public async Task ListScenarios_ReturnsCondensedNodeChains()
+    {
+        var scenarios = new APICover.Storage.InMemoryScenarioStore();
+        await scenarios.SaveAsync(new Scenario
+        {
+            Id = "withdraw-then-approve",
+            Name = "Bank withdrawal then credit approval",
+            Description = "User withdraws, then credit approval fires",
+            Tags = new List<string> { "banking" },
+            Nodes = new List<ApiNode>
+            {
+                new() { Id = "w", Method = "POST", Path = "/withdrawals" },
+                new() { Id = "a", Method = "POST", Path = "/credit/approve" },
+            },
+        });
+        var dispatcher = new ToolDispatcher(new FakeDiscovery(SampleEndpoints()), new InMemoryAgentMemoryStore(), scenarios);
+
+        var result = await dispatcher.DispatchAsync(ToolRegistry.ListScenarios, null, default);
+
+        Assert.False(result.IsError);
+        Assert.Equal(1, result.Output["count"]!.GetValue<int>());
+        var s = result.Output["scenarios"]!.AsArray()[0]!;
+        Assert.Equal("withdraw-then-approve", s["id"]!.GetValue<string>());
+        var chain = s["nodeChain"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+        Assert.Equal(new[] { "POST /withdrawals", "POST /credit/approve" }, chain);
+    }
+
     private static NodeResult MakeResult(string nodeId, string[] branch, NodeStatus status, int httpStatus, string? error = null) => new()
     {
         NodeId = nodeId,

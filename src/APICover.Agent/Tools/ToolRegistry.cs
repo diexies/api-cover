@@ -22,6 +22,7 @@ public static class ToolRegistry
     public const string GetCommunityContext = "get_community_context";
     public const string RunScenario = "run_scenario";
     public const string GetDirtyCommunities = "get_dirty_communities";
+    public const string ListScenarios = "list_scenarios";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
 
@@ -292,6 +293,18 @@ public static class ToolRegistry
                   }
                 }
                 """)!
+            },
+            new ToolDefinition
+            {
+                Name = ListScenarios,
+                Description =
+                    "List saved scenarios in condensed form: id, name, description, tags, "
+                  + "node chain (METHOD /path sequence) and case-set count. Use to answer "
+                  + "'where is the <business flow> simulation?' questions — match the "
+                  + "user's described flow against node chains and descriptions — and to "
+                  + "check which declared intents already have scenario coverage before "
+                  + "authoring new ones.",
+                InputSchema = JsonNode.Parse("""{ "type": "object", "properties": {} }""")!
             }
         };
     }

@@ -43,8 +43,36 @@ patterns/<name>.md       ← repeated implementation patterns (retry policy, ide
                            key handling, optimistic concurrency, …).
 ```
 
+```
+intents/<slug>.md        ← user-declared business intent: how a flow is SUPPOSED to work
+                           (and what must never happen). The ground truth the user gives
+                           you — everything else you infer is a guess ranked below it.
+```
+
 `system.md` and `communities/` are the primary scan artifacts — chat and QA modes read
 them first. The other categories supplement them with facts learned outside scans.
+
+### Intent cards (`intents/<slug>.md`) — schema
+
+The system map tells you what the code DOES; intent cards record what the user says it
+SHOULD do. Every intent card has exactly these sections:
+
+- `# <human name of the flow>` — e.g. "Bank withdrawal then credit approval"
+- `## Told by user` — the user's own words, quoted, with date. Never paraphrase away
+  constraints; "asla/never/must not" sentences are contract, keep them verbatim.
+- `## Operation group` — which community/domain this belongs to (label from system.md).
+- `## Expected steps` — ordered step list with data handoffs, as the user described.
+- `## Must-not rules` — explicit prohibitions (e.g. "credit approval must not fire
+  before withdrawal settles").
+- `## Mapping` — your endpoint/scenario matching, updated on every align pass:
+  - `endpoints:` matched METHOD /path list, or `MISSING` per step with no endpoint
+  - `scenario:` covering scenario id, or `NONE`
+  - `status:` one of `covered` (scenario exists + runs), `untested` (endpoints exist,
+    no scenario), `gap` (steps with no endpoints), `conflict` (behaviour contradicts a
+    must-not rule — cite the evidence)
+
+Status is recomputed evidence-first: never mark `covered` without a scenario id that
+actually contains the step chain.
 
 ### When to write a memory file
 

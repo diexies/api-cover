@@ -17,7 +17,8 @@ public enum AgentRunMode
     Scan = 1,
     ScenarioGen = 2,
     ScenarioInfer = 3,
-    Qa = 4
+    Qa = 4,
+    Align = 5
 }
 
 /// <summary>
@@ -32,10 +33,22 @@ public sealed class AgentRunCoordinator
       + "1. Call `list_memory` first.\n"
       + "2. Read every memory file relevant to the user's prompt before reasoning. If "
       + "`system.md` exists, read it first — it is the top-level system understanding; "
-      + "follow its pointers into `communities/<label>.md` for domain detail.\n"
-      + "3. Answer concisely. Cite memory file paths. Never invent endpoints.\n"
-      + "4. If you discover a fact not in memory, append it to the appropriate file before "
-      + "ending the turn, with a `<!-- learned -->` provenance comment.\n";
+      + "follow its pointers into `communities/<label>.md` for domain detail. User-declared "
+      + "`intents/` cards outrank your own inferences — when they disagree, trust the "
+      + "intent and flag the discrepancy.\n"
+      + "3. FLOW LOOKUP. When the user asks 'where is the <business flow> simulation / "
+      + "test / scenario?' (e.g. 'user withdraws from bank then approves credit'): "
+      + "(a) check `intents/` for a matching card — its Mapping section answers directly; "
+      + "(b) else `list_scenarios` and match the described steps against node chains, "
+      + "names and descriptions; (c) else match against `communities/` likely-flows to "
+      + "say which endpoints WOULD implement it. Always end with one of: the scenario id "
+      + "that covers it · 'endpoints exist but no scenario — shall I author it?' · 'no "
+      + "endpoint implements step X — this flow is not in the API'. Never claim coverage "
+      + "without a scenario id.\n"
+      + "4. Answer concisely. Cite memory file paths. Never invent endpoints.\n"
+      + "5. If you discover a fact not in memory, append it to the appropriate file before "
+      + "ending the turn, with a `<!-- learned -->` provenance comment. If the user "
+      + "describes how a flow SHOULD work mid-chat, capture it as an `intents/` card too.\n";
 
     private const string ScenarioInferModeTail =
         "## Mode: scenario-inference\n\n"
@@ -191,6 +204,31 @@ public sealed class AgentRunCoordinator
       + "5. Maintain `index.md` after every write — one line per file with a read-when hook.\n"
       + "6. STOP. Do not produce conversational output — your work is the memory files.\n";
 
+    private const string AlignModeTail =
+        "## Mode: align (intent capture + gap analysis)\n\n"
+      + "The user is telling you how their application is SUPPOSED to work — business "
+      + "flows, ordering constraints, prohibitions. Your inferences from code are guesses; "
+      + "what the user states here is ground truth and outranks them. Procedure:\n\n"
+      + "1. CAPTURE. Parse the user's message into one intent per distinct flow. For each, "
+      + "write or update `intents/<slug>.md` using the schema from the memory protocol "
+      + "(Told by user — verbatim quotes, Operation group, Expected steps, Must-not rules, "
+      + "Mapping). If an intent card for the same flow exists, merge — never lose an "
+      + "earlier must-not rule.\n"
+      + "2. MATCH. For every captured/updated intent: read `system.md` + the relevant "
+      + "`communities/<label>.md` (or `get_communities` + `get_community_context` if no "
+      + "scan exists), then `list_scenarios`. Map each expected step to endpoints and find "
+      + "a covering scenario. Fill `## Mapping` with endpoints / scenario / status "
+      + "(covered · untested · gap · conflict).\n"
+      + "3. GAPS. Steps with no matching endpoint = gap: the user expects behaviour the "
+      + "API does not implement (or names it differently — say which you believe and why). "
+      + "Must-not rules that current behaviour violates = conflict; cite evidence.\n"
+      + "4. ASK. If an intent is ambiguous (unclear ordering, unnamed data handoff, vague "
+      + "actor), ask the user 1-3 targeted questions at the end — do not guess silently.\n"
+      + "5. REPORT. Update `index.md`, then reply with a compact alignment table: intent → "
+      + "status → evidence one-liner, followed by gaps/conflicts needing attention and "
+      + "your questions. Offer to author scenarios for `untested` intents (do not save "
+      + "without approval).\n";
+
     private const string QaModeTail =
         "## Mode: qa (autonomous quality sweep)\n\n"
       + "Your job: predict how a UI consumes this API, prove the flows work, derive "
@@ -200,12 +238,18 @@ public sealed class AgentRunCoordinator
       + "`list_memory` first. If `system.md` and `communities/` cards exist, read them and "
       + "skip rediscovery. Otherwise `get_communities`, then `get_community_context` for "
       + "the top 2-3 risk-ranked communities. Infer the domain from names, schemas and "
-      + "chains — the project can be any domain; never ask the user what it does.\n\n"
+      + "chains — the project can be any domain; never ask the user what it does. Read "
+      + "every `intents/` card: user-declared flows and must-not rules are ground truth — "
+      + "they override your inferences and their Expected steps/Must-not rules become "
+      + "test expectations.\n\n"
       + "PHASE 2 — JOURNEYS.\n"
-      + "Predict 3-6 integrated UI journeys. Prioritise: (a) cross-community seams — those "
-      + "are integrated flows (e.g. create user → invoice them → pay); (b) endpoints "
-      + "sharing downstream services — shared state means write-then-read pairs; (c) CRUD "
-      + "lifecycles. Name each journey and its data handoffs.\n\n"
+      + "Predict 3-6 integrated UI journeys. Declared intents come FIRST — every intent "
+      + "with status untested/gap is a mandatory journey candidate (gaps get reported in "
+      + "findings as missing implementation, not scenario-authored). Then supplement with: "
+      + "(a) cross-community seams — those are integrated flows (e.g. create user → "
+      + "invoice them → pay); (b) endpoints sharing downstream services — shared state "
+      + "means write-then-read pairs; (c) CRUD lifecycles. Name each journey and its data "
+      + "handoffs.\n\n"
       + "PHASE 3 — SCENARIOS + EXCEPTIONAL CASES.\n"
       + "For each journey build ONE scenario via `save_scenario`: sequential DAG, single "
       + "start node, JSONLogic handoffs (`{\"var\":\"nodes.<id>.response.body.<field>\"}`), "
@@ -218,9 +262,11 @@ public sealed class AgentRunCoordinator
       + "`run_scenario` each saved scenario. Triage every failed branch AND every "
       + "suspicious success: 5xx anywhere = suspected server bug; 2xx for a variant "
       + "labelled 'expect 4xx' = validation gap; create succeeded but read-back failed = "
-      + "state consistency bug; timeout = hang suspect. A 4xx on an 'expect 4xx' variant "
-      + "counts as run FAILED by engine rules but is CORRECT behaviour — do not report "
-      + "it as a bug; note it as verified rejection.\n\n"
+      + "state consistency bug; timeout = hang suspect; observed behaviour violating a "
+      + "declared intents/ must-not rule = intent violation, the highest-confidence "
+      + "finding class (the user told you it must never happen). A 4xx on an 'expect "
+      + "4xx' variant counts as run FAILED by engine rules but is CORRECT behaviour — do "
+      + "not report it as a bug; note it as verified rejection.\n\n"
       + "PHASE 5 — FINDINGS.\n"
       + "For each confirmed suspicion write `findings/<slug>.md` via `write_memory`: "
       + "severity (high/medium/low), endpoint, repro scenario id + variant path, evidence "
@@ -738,6 +784,7 @@ public sealed class AgentRunCoordinator
             AgentRunMode.ScenarioGen => ScenarioGenModeTail,
             AgentRunMode.ScenarioInfer => ScenarioInferModeTail,
             AgentRunMode.Qa => QaModeTail,
+            AgentRunMode.Align => AlignModeTail,
             _ => ChatModeTail
         };
         // Scenario modes do not benefit from the memory index — skip the bloat.
