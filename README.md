@@ -10,6 +10,8 @@ Visual state-space tester for ASP.NET Core HTTP APIs.
 
 [**apicover.com**](https://apicover.com) · [Quickstart](#quickstart) · [Story](STORY.md) · [Roadmap](#roadmap)
 
+**English** · [Türkçe](docs/tr/README.md) · [Русский](docs/ru/README.md) · [About (EN)](docs/en/README.md)
+
 [![NuGet](https://img.shields.io/nuget/v/APICover?style=flat-square&logo=nuget&color=004880)](https://www.nuget.org/packages/APICover)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/license-MIT-22863a?style=flat-square)](LICENSE)
