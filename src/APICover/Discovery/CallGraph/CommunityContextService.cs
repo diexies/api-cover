@@ -1,5 +1,7 @@
 using APICover.Abstractions.Discovery;
 using APICover.Abstractions.Services;
+using APICover.Endpoints;
+using Microsoft.Extensions.Hosting;
 
 namespace APICover.Discovery.CallGraph;
 
@@ -14,17 +16,29 @@ public interface ICommunityContextService
 {
     Task<object> GetOverviewAsync(CancellationToken cancellationToken = default);
     Task<object?> GetCommunityContextAsync(int index, CancellationToken cancellationToken = default);
+
+    /// <summary>Which communities are touched by code changed since <paramref name="sinceSha"/>?
+    /// Enables incremental understanding: re-scan only dirty cards instead of the whole host.</summary>
+    Task<object> GetDirtyCommunitiesAsync(string sinceSha, CancellationToken cancellationToken = default);
 }
 
 internal sealed class CommunityContextService : ICommunityContextService
 {
     private readonly IServiceMapService _mapService;
     private readonly IEndpointDiscoveryService _discovery;
+    private readonly ICallGraphStore? _callGraphs;
+    private readonly IHostEnvironment? _env;
 
-    public CommunityContextService(IServiceMapService mapService, IEndpointDiscoveryService discovery)
+    public CommunityContextService(
+        IServiceMapService mapService,
+        IEndpointDiscoveryService discovery,
+        ICallGraphStore? callGraphs = null,
+        IHostEnvironment? env = null)
     {
         _mapService = mapService;
         _discovery = discovery;
+        _callGraphs = callGraphs;
+        _env = env;
     }
 
     public async Task<object> GetOverviewAsync(CancellationToken cancellationToken = default)
@@ -61,6 +75,9 @@ internal sealed class CommunityContextService : ICommunityContextService
         return new
         {
             generatedAt = map.GeneratedAt,
+            // Stamp into system.md so a later run can ask get_dirty_communities(sinceSha)
+            // and re-scan only what changed.
+            headSha = _env is null ? null : GitLog.HeadSha(_env.ContentRootPath),
             totalEndpoints = map.Nodes.Count(n => n.Kind == ServiceMapNodeKind.Endpoint),
             totalCommunities = map.Communities.Count,
             hint = "Communities are risk-ordered: index 0 deserves attention first. "
@@ -150,6 +167,104 @@ internal sealed class CommunityContextService : ICommunityContextService
                  + "shared state — mutations through one endpoint are observable through "
                  + "its siblings. Cross-community links are integration-flow seams.",
         };
+    }
+
+    public async Task<object> GetDirtyCommunitiesAsync(string sinceSha, CancellationToken cancellationToken = default)
+    {
+        if (_callGraphs is null || _env is null)
+        {
+            return new { error = "Dirty-community tracking unavailable — call graph store or host environment not registered." };
+        }
+        if (string.IsNullOrWhiteSpace(sinceSha))
+        {
+            return new { error = "Required field 'sinceSha' is missing. Read it from system.md (headSha of the last scan)." };
+        }
+
+        var root = _env.ContentRootPath;
+        var headSha = GitLog.HeadSha(root);
+        var changed = GitLog.ChangedFiles(root, sinceSha.Trim());
+        if (changed is null)
+        {
+            return new { error = $"git diff failed for '{sinceSha}' — bad sha or not a git repo. Fall back to a full scan." };
+        }
+        if (changed.Count == 0)
+        {
+            return new { sinceSha, headSha, changedFileCount = 0, dirtyCommunities = Array.Empty<object>(), hint = "Nothing changed — memory cards are current." };
+        }
+
+        var changedNormalized = changed.Select(NormalizePath).ToList();
+        var map = await _mapService.BuildAsync(cancellationToken).ConfigureAwait(false);
+        var nodesById = map.Nodes.ToDictionary(n => n.Id, StringComparer.Ordinal);
+        var graphs = await _callGraphs.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        var matchedFiles = new HashSet<string>(StringComparer.Ordinal);
+        var dirtyByCommunity = new Dictionary<int, (HashSet<string> Endpoints, HashSet<string> Files)>();
+        foreach (var graph in graphs)
+        {
+            var files = new HashSet<string>(StringComparer.Ordinal);
+            CollectFilePaths(graph.RootCall, files);
+            var hits = changedNormalized
+                .Where(cf => files.Any(f => PathMatches(f, cf)))
+                .ToList();
+            if (hits.Count == 0) continue;
+            foreach (var h in hits) matchedFiles.Add(h);
+            if (!nodesById.TryGetValue(graph.EndpointId, out var node) || node.CommunityIndex < 0) continue;
+            if (!dirtyByCommunity.TryGetValue(node.CommunityIndex, out var acc))
+            {
+                acc = (new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+                dirtyByCommunity[node.CommunityIndex] = acc;
+            }
+            acc.Endpoints.Add(graph.EndpointId);
+            foreach (var h in hits) acc.Files.Add(h);
+        }
+
+        var dirty = dirtyByCommunity
+            .OrderBy(kv => kv.Key)
+            .Select(kv =>
+            {
+                var community = map.Communities.FirstOrDefault(c => c.Index == kv.Key);
+                return new
+                {
+                    index = kv.Key,
+                    label = community?.Label ?? $"community-{kv.Key}",
+                    riskScore = community?.RiskScore ?? 0,
+                    dirtyEndpoints = kv.Value.Endpoints.OrderBy(s => s, StringComparer.Ordinal).ToArray(),
+                    changedFiles = kv.Value.Files.OrderBy(s => s, StringComparer.Ordinal).ToArray(),
+                };
+            })
+            .ToArray();
+
+        var unmatched = changedNormalized.Where(cf => !matchedFiles.Contains(cf)).ToArray();
+        return new
+        {
+            sinceSha,
+            headSha,
+            changedFileCount = changed.Count,
+            dirtyCommunities = dirty,
+            cleanCommunityCount = map.Communities.Count - dirty.Length,
+            unmatchedChangedFiles = unmatched,
+            hint = dirty.Length == 0
+                ? "Changes touched no endpoint call graph (infra/docs/config). Cards likely current; re-scan only if unmatched files include startup/routing code."
+                : "Re-scan ONLY the dirty communities' cards, then refresh system.md with the new headSha. Unmatched files that affect startup/DI may still warrant a full scan.",
+        };
+    }
+
+    private static void CollectFilePaths(CallNode node, HashSet<string> files)
+    {
+        if (!string.IsNullOrEmpty(node.FilePath)) files.Add(NormalizePath(node.FilePath));
+        foreach (var c in node.Calls) CollectFilePaths(c, files);
+    }
+
+    private static string NormalizePath(string path) => path.Replace('\\', '/');
+
+    /// <summary>Suffix match with a segment boundary: an absolute PDB path matches the
+    /// repo-relative git path when it ends with it at a '/' boundary.</summary>
+    private static bool PathMatches(string absoluteOrLonger, string repoRelative)
+    {
+        if (absoluteOrLonger.Length < repoRelative.Length) return false;
+        if (!absoluteOrLonger.EndsWith(repoRelative, StringComparison.Ordinal)) return false;
+        var idx = absoluteOrLonger.Length - repoRelative.Length;
+        return idx == 0 || absoluteOrLonger[idx - 1] == '/';
     }
 
     private static (List<string> Services, List<string> Boundaries) WalkDownstream(

@@ -64,6 +64,7 @@ public sealed class ToolDispatcher
                 ToolRegistry.GetCommunities => await HandleGetCommunitiesAsync(cancellationToken),
                 ToolRegistry.GetCommunityContext => await HandleGetCommunityContextAsync(input, cancellationToken),
                 ToolRegistry.RunScenario => await HandleRunScenarioAsync(input, cancellationToken),
+                ToolRegistry.GetDirtyCommunities => await HandleGetDirtyCommunitiesAsync(input, cancellationToken),
                 _ => null
             };
 
@@ -156,6 +157,17 @@ public sealed class ToolDispatcher
 
     private static string? Truncate(string? s, int max)
         => s is null ? null : s.Length <= max ? s : s[..max] + "…";
+
+    private async Task<JsonNode> HandleGetDirtyCommunitiesAsync(JsonNode? input, CancellationToken cancellationToken)
+    {
+        if (_communities is null)
+        {
+            return JsonValue.Create("Community context unavailable — call AddAPICover() before AddAPICoverAgent().")!;
+        }
+        var sinceSha = input?["sinceSha"]?.GetValue<string>() ?? string.Empty;
+        var result = await _communities.GetDirtyCommunitiesAsync(sinceSha, cancellationToken);
+        return JsonSerializer.SerializeToNode(result, ScenarioJsonOptions)!;
+    }
 
     private async Task<JsonNode> HandleGetCommunitiesAsync(CancellationToken cancellationToken)
     {

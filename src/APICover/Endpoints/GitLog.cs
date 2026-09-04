@@ -165,6 +165,23 @@ internal static class GitLog
         }
     }
 
+    /// <summary>Current HEAD sha, or null when the content root is not a git repo.</summary>
+    internal static string? HeadSha(string workingDir)
+        => RunGit(workingDir, new[] { "rev-parse", "HEAD" }, 3000)?.Trim();
+
+    /// <summary>Repo-relative paths changed between <paramref name="sinceSha"/> and HEAD
+    /// (committed changes) plus the working tree. Null when git fails (bad sha, no repo).</summary>
+    internal static IReadOnlyList<string>? ChangedFiles(string workingDir, string sinceSha)
+    {
+        var output = RunGit(workingDir, new[] { "diff", "--name-only", sinceSha, "HEAD" }, 10000);
+        if (output is null) return null;
+        var working = RunGit(workingDir, new[] { "diff", "--name-only" }, 10000) ?? string.Empty;
+        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Concat(working.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
     private static readonly ConcurrentDictionary<string, CommitDetail> Cache = new();
 
     private static string? RunGit(string workingDir, IEnumerable<string> args, int timeoutMs)

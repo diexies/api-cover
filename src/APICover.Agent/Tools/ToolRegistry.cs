@@ -21,6 +21,7 @@ public static class ToolRegistry
     public const string GetCommunities = "get_communities";
     public const string GetCommunityContext = "get_community_context";
     public const string RunScenario = "run_scenario";
+    public const string GetDirtyCommunities = "get_dirty_communities";
 
     public static IReadOnlyList<ToolDefinition> Definitions { get; } = BuildDefinitions();
 
@@ -268,6 +269,26 @@ public static class ToolRegistry
                   "properties": {
                     "id": { "type": "string", "description": "Scenario id (kebab-case) previously saved." },
                     "timeoutSeconds": { "type": "integer", "description": "Max seconds to wait for completion (default 90, max 300)." }
+                  }
+                }
+                """)!
+            },
+            new ToolDefinition
+            {
+                Name = GetDirtyCommunities,
+                Description =
+                    "Which domain communities did code changes touch since the last scan? "
+                  + "Pass the headSha stamped in system.md. Returns dirty communities with "
+                  + "their affected endpoints and changed files, plus unmatched files. Use "
+                  + "for incremental scans: re-read/re-write ONLY dirty cards instead of "
+                  + "rebuilding all memory. If unmatched files include startup/DI/routing "
+                  + "code, prefer a full scan.",
+                InputSchema = JsonNode.Parse("""
+                {
+                  "type": "object",
+                  "required": ["sinceSha"],
+                  "properties": {
+                    "sinceSha": { "type": "string", "description": "Git sha recorded at the previous scan (headSha in system.md)." }
                   }
                 }
                 """)!

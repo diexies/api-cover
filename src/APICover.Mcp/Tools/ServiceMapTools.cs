@@ -277,6 +277,14 @@ public static class ServiceMapTools
         return result ?? new { error = $"No community with index {index}. Call system.communities first." };
     }
 
+    [McpServerTool(Name = "system.dirty_communities")]
+    [Description("WHEN: memory/understanding cards exist from a previous scan and code has changed — find which domain communities the diff touches so only those get re-read/re-scanned. Pass the headSha recorded at the last scan (system.communities response carries headSha).\n\nResponse: { sinceSha, headSha, changedFileCount, dirtyCommunities:[{index,label,riskScore,dirtyEndpoints[],changedFiles[]}], cleanCommunityCount, unmatchedChangedFiles[], hint }.")]
+    public static Task<object> DirtyCommunities(
+        ICommunityContextService communityContext,
+        [Description("Git sha of the last scan (headSha stamped in system.md / system.communities).")] string sinceSha,
+        CancellationToken ct)
+        => communityContext.GetDirtyCommunitiesAsync(sinceSha, ct);
+
     [McpServerTool(Name = "endpoint.callgraph")]
     [Description("WHEN: need the full call tree under an endpoint — every method, file:line, summary, signals. Use to trace 'what does this endpoint touch end-to-end'. Truncates by depth to keep payload manageable.\n\nResponse: { endpointId, rootMethod, generatedAt, truncated, rootCall:CallNode } where CallNode = { displayName, declaringType, methodName, kind, resolvedImpl, filePath, line, endLine, summary, signals, calls[] }.")]
     public static async Task<object> CallGraph(
