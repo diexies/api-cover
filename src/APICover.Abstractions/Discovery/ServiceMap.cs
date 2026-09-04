@@ -17,6 +17,35 @@ public sealed class ServiceMap
     /// island is an array of node ids that share at least one call edge transitively.
     /// Singleton islands typically indicate dead code or unwired surfaces.</summary>
     public required IReadOnlyList<IReadOnlyList<string>> Islands { get; init; }
+
+    /// <summary>Domain communities detected by label propagation over the call graph
+    /// (synthetic app-root edges excluded, so communities reflect real shared
+    /// dependencies, not the layout anchor). Ordered by <see cref="ServiceMapCommunity.RiskScore"/>
+    /// descending — index 0 is where attention should go first. Large surfaces
+    /// (hundreds of endpoints) chunk into these for LLM-sized context windows.</summary>
+    public required IReadOnlyList<ServiceMapCommunity> Communities { get; init; }
+}
+
+/// <summary>A cluster of nodes that share downstream dependencies — one "domain module"
+/// of the host (users, invoicing, payments…). Detected structurally; no naming
+/// convention required.</summary>
+public sealed class ServiceMapCommunity
+{
+    /// <summary>Index into <see cref="ServiceMap.Communities"/>; matches
+    /// <see cref="ServiceMapNode.CommunityIndex"/> on member nodes.</summary>
+    public required int Index { get; init; }
+
+    /// <summary>Human label — dominant endpoint path segment when available,
+    /// else the highest-coupling member service.</summary>
+    public required string Label { get; init; }
+
+    public required IReadOnlyList<string> NodeIds { get; init; }
+
+    public required int EndpointCount { get; init; }
+
+    /// <summary>Aggregate attention score in [0, 100]: peak member risk weighted with the
+    /// community average, so one dangerous endpoint keeps its cluster visible.</summary>
+    public required double RiskScore { get; init; }
 }
 
 public enum ServiceMapNodeKind
@@ -59,6 +88,10 @@ public sealed class ServiceMapNode
 
     /// <summary>Index into <see cref="ServiceMap.Islands"/>.</summary>
     public required int IslandIndex { get; init; }
+
+    /// <summary>Index into <see cref="ServiceMap.Communities"/>; <c>-1</c> for the
+    /// synthetic app root, which belongs to every community and none.</summary>
+    public required int CommunityIndex { get; init; }
 
     /// <summary>BFS distance from the synthetic <c>app:host</c> root over the
     /// undirected projection of the call graph. <c>0</c> for the root, then
@@ -123,4 +156,9 @@ public sealed class ServiceMapMetrics
     /// 15% Depth, 10% ExternalReach, 10% DatabaseReach. Normalised against the map's max
     /// for each component so scores are comparable inside one map.</summary>
     public required double Coupling { get; init; }
+
+    /// <summary>Attention score in [0, 100] for triage ordering: 50% coupling,
+    /// 30% boundary exposure (external + DB reach), 20% call depth. Higher =
+    /// more places to break, more I/O to break against, longer chains to debug.</summary>
+    public double Risk { get; init; }
 }

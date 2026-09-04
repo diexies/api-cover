@@ -149,6 +149,35 @@ internal sealed class ServiceMapBuilder : IServiceMapService
         var maxExt = Math.Max(1, reachCache.Values.Max(r => r.Externals.Count));
         var maxDb = Math.Max(1, reachCache.Values.Max(r => r.Databases.Count));
 
+        // Risk pre-pass — needed before community ordering.
+        var couplingByNode = new Dictionary<string, double>(StringComparer.Ordinal);
+        var riskByNode = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var n in nodes.Values)
+        {
+            var reach = reachCache[n.Id];
+            couplingByNode[n.Id] =
+                  0.40 * ((double)n.FanOutSet.Count / maxFanOut) * 100
+                + 0.25 * ((double)n.FanInSet.Count / maxFanIn) * 100
+                + 0.15 * ((double)reach.Depth / maxDepth) * 100
+                + 0.10 * ((double)reach.Externals.Count / maxExt) * 100
+                + 0.10 * ((double)reach.Databases.Count / maxDb) * 100;
+            riskByNode[n.Id] =
+                  0.50 * couplingByNode[n.Id]
+                + 0.30 * ((double)(reach.Externals.Count + reach.Databases.Count) / (maxExt + maxDb)) * 100
+                + 0.20 * ((double)reach.Depth / maxDepth) * 100;
+        }
+
+        // Domain communities — label propagation over real dependency edges only.
+        // App-root edges are the layout anchor, not a dependency; including them
+        // would fold the whole host into one community.
+        var communityByNode = ComputeCommunities(nodes, edges, AppRootId);
+        var communities = BuildCommunityList(communityByNode, nodes, riskByNode);
+        var communityIndexByNode = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var c in communities)
+        {
+            foreach (var id in c.NodeIds) communityIndexByNode[id] = c.Index;
+        }
+
         var nodeList = new List<ServiceMapNode>(nodes.Count);
         foreach (var n in nodes.Values)
         {
@@ -156,12 +185,6 @@ internal sealed class ServiceMapBuilder : IServiceMapService
             var fanIn = n.FanInSet.Count;
             var fanOut = n.FanOutSet.Count;
             var instability = (fanIn + fanOut) == 0 ? (double?)null : (double)fanOut / (fanIn + fanOut);
-            var coupling =
-                  0.40 * ((double)fanOut / maxFanOut) * 100
-                + 0.25 * ((double)fanIn / maxFanIn) * 100
-                + 0.15 * ((double)reach.Depth / maxDepth) * 100
-                + 0.10 * ((double)reach.Externals.Count / maxExt) * 100
-                + 0.10 * ((double)reach.Databases.Count / maxDb) * 100;
 
             siblingCounts.TryGetValue(n.Id, out var siblings);
             islandIndexMap.TryGetValue(islandByNode[n.Id], out var island);
@@ -178,6 +201,7 @@ internal sealed class ServiceMapBuilder : IServiceMapService
                 HttpMethod = n.HttpMethod,
                 Area = n.Area,
                 IslandIndex = island,
+                CommunityIndex = communityIndexByNode.GetValueOrDefault(n.Id, -1),
                 Level = level,
                 IsIsolated = n.IsIsolated,
                 Metrics = new ServiceMapMetrics
@@ -190,7 +214,8 @@ internal sealed class ServiceMapBuilder : IServiceMapService
                     ServiceReach = reach.Services.Count,
                     SiblingEndpoints = siblings,
                     Instability = instability,
-                    Coupling = Math.Round(coupling, 2)
+                    Coupling = Math.Round(couplingByNode[n.Id], 2),
+                    Risk = Math.Round(riskByNode[n.Id], 2)
                 }
             });
         }
@@ -217,8 +242,203 @@ internal sealed class ServiceMapBuilder : IServiceMapService
             Edges = edgeList,
             Islands = islandsList
                 .Select(l => (IReadOnlyList<string>)l.OrderBy(s => s, StringComparer.Ordinal).ToList())
-                .ToList()
+                .ToList(),
+            Communities = communities
         };
+    }
+
+    /// <summary>
+    /// Deterministic label propagation over the undirected projection of dependency
+    /// edges, excluding anything touching the app root. Nodes iterate in ordinal id
+    /// order and adopt their most frequent neighbour label (ties → smallest label),
+    /// so identical inputs always produce identical communities. Edge-less endpoints
+    /// fall back to a synthetic per-path-prefix community, which groups an unwired
+    /// "/users" surface even when the IL walker resolved nothing behind it.
+    /// </summary>
+    private static Dictionary<string, string> ComputeCommunities(
+        Dictionary<string, MutableNode> nodes,
+        Dictionary<(string From, string To, ServiceMapEdgeKind Kind), int> edges,
+        string appRootId)
+    {
+        var neighbours = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var ((from, to, _), _) in edges)
+        {
+            if (from == appRootId || to == appRootId) continue;
+            if (!neighbours.TryGetValue(from, out var fl)) neighbours[from] = fl = new List<string>();
+            if (!neighbours.TryGetValue(to, out var tl)) neighbours[to] = tl = new List<string>();
+            fl.Add(to);
+            tl.Add(from);
+        }
+
+        var ordered = nodes.Keys.Where(id => id != appRootId).OrderBy(id => id, StringComparer.Ordinal).ToList();
+        var label = ordered.ToDictionary(id => id, id => id, StringComparer.Ordinal);
+
+        for (var iter = 0; iter < 20; iter++)
+        {
+            var changed = false;
+            foreach (var id in ordered)
+            {
+                if (!neighbours.TryGetValue(id, out var ns) || ns.Count == 0) continue;
+                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var n in ns)
+                {
+                    var l = label[n];
+                    counts[l] = counts.GetValueOrDefault(l) + 1;
+                }
+                string best = label[id];
+                var bestCount = -1;
+                foreach (var (l, c) in counts)
+                {
+                    if (c > bestCount || (c == bestCount && string.CompareOrdinal(l, best) < 0))
+                    {
+                        best = l;
+                        bestCount = c;
+                    }
+                }
+                if (best != label[id])
+                {
+                    label[id] = best;
+                    changed = true;
+                }
+            }
+            if (!changed) break;
+        }
+
+        // Fallback: edge-less endpoints group by first path segment instead of
+        // exploding into singletons on large unwired surfaces.
+        foreach (var id in ordered)
+        {
+            if (neighbours.ContainsKey(id)) continue;
+            var n = nodes[id];
+            if (n.Kind == ServiceMapNodeKind.Endpoint)
+            {
+                label[id] = $"prefix:{FirstPathSegment(id)}";
+            }
+        }
+
+        // Merge pass 1: a community with no endpoints (a stranded service/repo layer)
+        // is useless for scenario work — fold it into the neighbouring community it
+        // shares the most edges with. Two rounds handle repo→service→endpoint chains.
+        for (var round = 0; round < 2; round++)
+        {
+            var members = label.GroupBy(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+            foreach (var (community, ids) in members)
+            {
+                if (ids.Any(id => nodes[id].Kind == ServiceMapNodeKind.Endpoint)) continue;
+                var crossEdges = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var id in ids)
+                {
+                    if (!neighbours.TryGetValue(id, out var ns)) continue;
+                    foreach (var other in ns)
+                    {
+                        var ol = label[other];
+                        if (ol == community) continue;
+                        crossEdges[ol] = crossEdges.GetValueOrDefault(ol) + 1;
+                    }
+                }
+                if (crossEdges.Count == 0) continue;
+                var target = crossEdges.OrderByDescending(kv => kv.Value)
+                    .ThenBy(kv => kv.Key, StringComparer.Ordinal).First().Key;
+                foreach (var id in ids) label[id] = target;
+            }
+        }
+
+        // Merge pass 2: communities whose dominant endpoint prefix matches are the same
+        // domain split by propagation order — unify them under one label.
+        var byCommunity = label.GroupBy(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+        var canonicalByPrefix = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (community, ids) in byCommunity.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var eps = ids.Where(id => nodes[id].Kind == ServiceMapNodeKind.Endpoint).ToList();
+            if (eps.Count == 0) continue;
+            var prefix = eps.GroupBy(FirstPathSegment, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key, StringComparer.Ordinal).First().Key;
+            if (string.IsNullOrEmpty(prefix)) continue;
+            if (canonicalByPrefix.TryGetValue(prefix, out var canonical))
+            {
+                foreach (var id in ids) label[id] = canonical;
+            }
+            else
+            {
+                canonicalByPrefix[prefix] = community;
+            }
+        }
+
+        return label;
+    }
+
+    private List<ServiceMapCommunity> BuildCommunityList(
+        Dictionary<string, string> communityByNode,
+        Dictionary<string, MutableNode> nodes,
+        Dictionary<string, double> riskByNode)
+    {
+        var groups = communityByNode
+            .GroupBy(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var ids = g.OrderBy(s => s, StringComparer.Ordinal).ToList();
+                var endpointIds = ids.Where(id => nodes[id].Kind == ServiceMapNodeKind.Endpoint).ToList();
+                var risks = ids.Select(id => riskByNode.GetValueOrDefault(id)).ToList();
+                var peak = risks.Count > 0 ? risks.Max() : 0;
+                var avg = risks.Count > 0 ? risks.Average() : 0;
+                return new
+                {
+                    Ids = ids,
+                    EndpointCount = endpointIds.Count,
+                    Risk = Math.Round(0.6 * peak + 0.4 * avg, 2),
+                    Label = CommunityLabel(ids, endpointIds, nodes, riskByNode)
+                };
+            })
+            .OrderByDescending(g => g.Risk)
+            .ThenByDescending(g => g.Ids.Count)
+            .ThenBy(g => g.Label, StringComparer.Ordinal)
+            .ToList();
+
+        return groups
+            .Select((g, i) => new ServiceMapCommunity
+            {
+                Index = i,
+                Label = g.Label,
+                NodeIds = g.Ids,
+                EndpointCount = g.EndpointCount,
+                RiskScore = g.Risk
+            })
+            .ToList();
+    }
+
+    /// <summary>Dominant endpoint path segment; else highest-risk member service label.</summary>
+    private static string CommunityLabel(
+        List<string> ids,
+        List<string> endpointIds,
+        Dictionary<string, MutableNode> nodes,
+        Dictionary<string, double> riskByNode)
+    {
+        if (endpointIds.Count > 0)
+        {
+            var dominant = endpointIds
+                .GroupBy(FirstPathSegment, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => g.Key, StringComparer.Ordinal)
+                .First().Key;
+            if (!string.IsNullOrEmpty(dominant)) return dominant;
+        }
+        var topService = ids
+            .Where(id => nodes[id].Kind == ServiceMapNodeKind.Service)
+            .OrderByDescending(id => riskByNode.GetValueOrDefault(id))
+            .FirstOrDefault();
+        return topService is not null ? nodes[topService].Label : "misc";
+    }
+
+    /// <summary>"GET /users/{id}" → "users". Empty for root-path endpoints.</summary>
+    private static string FirstPathSegment(string endpointId)
+    {
+        var space = endpointId.IndexOf(' ');
+        var path = space >= 0 ? endpointId[(space + 1)..] : endpointId;
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 0 ? segments[0].ToLowerInvariant() : string.Empty;
     }
 
     private static void EnsureEndpointNode(

@@ -86,6 +86,74 @@ public class ServiceMapBuilderTests
     }
 
     [Fact]
+    public async Task DetectsCommunities_BysSharedDownstreamServices()
+    {
+        // users cluster: two endpoints share IUserSvc. billing cluster: two endpoints
+        // share IBillingSvc. App-root edges must NOT merge them into one community.
+        var u1 = MakeGraph("GET /users", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.IUserSvc", "List")));
+        var u2 = MakeGraph("POST /users", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.IUserSvc", "Create")));
+        var b1 = MakeGraph("GET /billing", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.IBillingSvc", "List")));
+        var b2 = MakeGraph("POST /billing/pay", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.IBillingSvc", "Pay",
+            calls => calls.Add(MakeCall(CallNodeKind.Database, "Demo.Db", "Save")))));
+
+        var map = await BuildMap(new[] { u1, u2, b1, b2 });
+
+        int CommunityOf(string id) => map.Nodes.First(n => n.Id == id).CommunityIndex;
+        Assert.Equal(CommunityOf("GET /users"), CommunityOf("POST /users"));
+        Assert.Equal(CommunityOf("GET /billing"), CommunityOf("POST /billing/pay"));
+        Assert.NotEqual(CommunityOf("GET /users"), CommunityOf("GET /billing"));
+
+        // Service rides with its endpoints.
+        Assert.Equal(CommunityOf("GET /users"), CommunityOf("Demo.IUserSvc"));
+
+        // App root belongs to no community.
+        Assert.Equal(-1, map.Nodes.First(n => n.Id == "app:host").CommunityIndex);
+
+        // Billing community carries the DB boundary → higher risk → sorts first.
+        var communities = map.Communities;
+        Assert.True(communities.Count >= 2, $"expected >= 2 communities, got {communities.Count}");
+        var billing = communities.First(c => c.Label == "billing");
+        var users = communities.First(c => c.Label == "users");
+        Assert.True(billing.RiskScore > users.RiskScore,
+            $"billing risk {billing.RiskScore} should exceed users risk {users.RiskScore}");
+        Assert.True(billing.Index < users.Index, "communities must be risk-ordered");
+        Assert.Equal(2, billing.EndpointCount);
+    }
+
+    [Fact]
+    public async Task EdgelessEndpoints_GroupIntoPrefixCommunities()
+    {
+        var g1 = MakeGraph("GET /ping", _ => { });
+        var g2 = MakeGraph("GET /ping/deep", _ => { });
+        var g3 = MakeGraph("GET /health", _ => { });
+
+        var map = await BuildMap(new[] { g1, g2, g3 });
+
+        int CommunityOf(string id) => map.Nodes.First(n => n.Id == id).CommunityIndex;
+        Assert.Equal(CommunityOf("GET /ping"), CommunityOf("GET /ping/deep"));
+        Assert.NotEqual(CommunityOf("GET /ping"), CommunityOf("GET /health"));
+        Assert.Contains(map.Communities, c => c.Label == "ping" && c.EndpointCount == 2);
+    }
+
+    [Fact]
+    public async Task RiskScore_RanksBoundaryHeavyEndpointHigher()
+    {
+        var deep = MakeGraph("POST /charge", root =>
+            root.Add(MakeCall(CallNodeKind.Interface, "Demo.IPay", "Charge", calls =>
+            {
+                calls.Add(MakeCall(CallNodeKind.ExternalHttp, "Demo.Stripe", "Post", _ => { }, notes: "→ https://api.stripe.com/x"));
+                calls.Add(MakeCall(CallNodeKind.Database, "Demo.Db", "Save"));
+            })));
+        var shallow = MakeGraph("GET /status", root => root.Add(MakeCall(CallNodeKind.Interface, "Demo.IStatus", "Get")));
+
+        var map = await BuildMap(new[] { deep, shallow });
+
+        var chargeRisk = map.Nodes.First(n => n.Id == "POST /charge").Metrics.Risk;
+        var statusRisk = map.Nodes.First(n => n.Id == "GET /status").Metrics.Risk;
+        Assert.True(chargeRisk > statusRisk, $"charge {chargeRisk} should outrank status {statusRisk}");
+    }
+
+    [Fact]
     public async Task CollapsesSubgraphsIntoAppRoot_AndIslandsIsolatedEndpoints()
     {
         // Endpoints that reach a boundary get an app:host edge, so otherwise-disconnected

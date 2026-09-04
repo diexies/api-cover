@@ -742,6 +742,8 @@ export interface ServiceMapMetrics {
   siblingEndpoints: number;
   instability: number | null;
   coupling: number;
+  /** Attention score 0-100: 50% coupling, 30% boundary exposure, 20% depth. */
+  risk?: number;
 }
 
 export interface ServiceMapNode {
@@ -755,8 +757,19 @@ export interface ServiceMapNode {
   area?: string;
   metrics: ServiceMapMetrics;
   islandIndex: number;
+  /** Index into ServiceMap.communities; -1 for the app root. */
+  communityIndex?: number;
   level: number;
   isIsolated?: boolean;
+}
+
+/** Structurally-detected domain module (users, invoicing, …), risk-ordered. */
+export interface ServiceMapCommunity {
+  index: number;
+  label: string;
+  nodeIds: string[];
+  endpointCount: number;
+  riskScore: number;
 }
 
 export interface ServiceMapEdge {
@@ -771,6 +784,7 @@ export interface ServiceMap {
   nodes: ServiceMapNode[];
   edges: ServiceMapEdge[];
   islands: string[][];
+  communities?: ServiceMapCommunity[];
 }
 
 export async function getServiceMap(): Promise<ServiceMap | null> {
