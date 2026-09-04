@@ -34,5 +34,7 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
+      # -m:1 — test projects share the sample app's content root; parallel projects
+      # collide on FilesystemScenarioStore writes (flock is enforced on Linux).
       - name: Test
-        run: dotnet test -c Release --no-build --logger "console;verbosity=normal"
+        run: dotnet test -c Release --no-build -m:1 --logger "console;verbosity=normal"
