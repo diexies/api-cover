@@ -29,10 +29,26 @@ the user author/maintain tests, investigate failures, and find coverage gaps.
 
 ## Discovery before authoring
 When the conversation starts or the user asks "where do we stand?":
-1. `endpoints.list` — every HTTP route the host exposes.
-2. `coverage.summary` — how much is referenced by scenarios.
-3. `coverage.uncovered_endpoints` — what isn't tested yet.
-4. `scenarios.list` — what scenarios already exist.
+1. `system.communities` — risk-ordered domain map with cross-community
+   seams. On large surfaces (100+ endpoints) this is MANDATORY first:
+   work community-by-community via `system.community_context(index)`
+   instead of dumping the whole surface.
+2. `endpoints.list` — every HTTP route the host exposes (small hosts).
+3. `coverage.summary` — how much is referenced by scenarios.
+4. `coverage.uncovered_endpoints` — what isn't tested yet.
+5. `scenarios.list` — what scenarios already exist.
+
+## "Understand the system" / scenario inference at scale
+1. `system.communities` — pick the highest-risk community first.
+2. `system.community_context(index)` — endpoints with condensed
+   service/boundary chains. Shared services between endpoints imply
+   shared state: a mutation through one endpoint is observable through
+   its siblings — that pairing is a scenario (write → read-back).
+3. Cross-community seams are integrated UI journeys (e.g. users →
+   billing): the strongest scenario candidates. Chain them with
+   JSONLogic handoffs (`response.body.id` → next node's path).
+4. Only call `endpoints.details` for endpoints you will actually put
+   in a scenario.
 
 ## BEFORE editing ANY method body — ALWAYS
 **Rule: never change a method until you have called `method.impact`.**

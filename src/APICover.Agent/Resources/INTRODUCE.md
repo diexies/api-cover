@@ -29,6 +29,10 @@ directly):
 ```
 INTRODUCE.md             ← this file. Re-read when context is unclear.
 INDEX.md                 ← curated table of every memory file you have created.
+system.md                ← top-level system card: domains, integration flows, attention
+                           ranking (the reduce step of a scan; replaces on rescan).
+communities/<label>.md   ← per-domain community card (the map step of a scan; one per
+                           structurally-detected community from get_communities).
 project.md               ← top-level project profile (single file, replaces on rescan).
 controllers/<name>.md    ← per-controller / per-route-group profile.
 services/<name>.md       ← per-service profile.
@@ -38,6 +42,9 @@ domain/<concept>.md      ← cross-cutting domain narratives (auth flow, transac
 patterns/<name>.md       ← repeated implementation patterns (retry policy, idempotency
                            key handling, optimistic concurrency, …).
 ```
+
+`system.md` and `communities/` are the primary scan artifacts — chat and QA modes read
+them first. The other categories supplement them with facts learned outside scans.
 
 ### When to write a memory file
 
