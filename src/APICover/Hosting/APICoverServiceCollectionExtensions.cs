@@ -39,6 +39,15 @@ public static class APICoverServiceCollectionExtensions
             services.AddOptions<APICoverOptions>();
         }
 
+        // Endpoint discovery (ApiExplorerDiscoveryService) IApiDescriptionGroupCollectionProvider'a
+        // bağlıdır — bu servis ApiExplorer altyapısıyla gelir. Minimal-API konak uygulamaları çoğu
+        // zaman AddControllers()/AddEndpointsApiExplorer() çağırmaz → servis kayıtlı değildir ve
+        // AddAPICover içindeki GetRequiredService startup'ta "No service for type
+        // IApiDescriptionGroupCollectionProvider" ile ÇÖKER. AddEndpointsApiExplorer() idempotenttir
+        // (TryAdd tabanlı) — zaten kayıtlıysa no-op, değilse eksik servisi ekler. Böylece APICover
+        // konak uygulamanın ApiExplorer çağırıp çağırmadığından bağımsız güvenle kurulur.
+        services.AddEndpointsApiExplorer();
+
         services.AddTransient<AuthHeaderDelegatingHandler>();
         services.AddHttpClient(ScenarioEngine.HttpClientName)
             .ConfigureHttpClient((sp, client) =>
@@ -72,9 +81,21 @@ public static class APICoverServiceCollectionExtensions
         // and IEndpointMethodResolver alias to the same implementation so the call-graph walker
         // can pull MethodInfo for an endpoint without a separate registration / re-walk.
         services.TryAddSingleton<ApiExplorerDiscoveryService>(sp =>
-            new ApiExplorerDiscoveryService(
-                sp.GetRequiredService<Microsoft.AspNetCore.Mvc.ApiExplorer.IApiDescriptionGroupCollectionProvider>(),
-                sp.GetServices<Microsoft.AspNetCore.Routing.EndpointDataSource>()));
+        {
+            // AddAPICover başında AddEndpointsApiExplorer() çağırdığımız için bu servis normalde
+            // HER ZAMAN mevcuttur. Yine de bazı sıra dışı konak kurulumları ApiExplorer altyapısını
+            // bilinçli kaldırabilir (ör. özel IServiceProvider, trimlenmiş minimal host). O durumda
+            // sessiz NullReferenceException yerine ne yapılacağını söyleyen AÇIK bir hata ver.
+            var provider = sp.GetService<Microsoft.AspNetCore.Mvc.ApiExplorer.IApiDescriptionGroupCollectionProvider>()
+                ?? throw new InvalidOperationException(
+                    "APICover endpoint keşfi için IApiDescriptionGroupCollectionProvider gerekli ancak kayıtlı değil. " +
+                    "AddAPICover() bunu AddEndpointsApiExplorer() ile otomatik ekler; konak uygulamanız ApiExplorer " +
+                    "altyapısını kaldırmışsa builder.Services.AddEndpointsApiExplorer() çağırın (minimal-API) ya da " +
+                    "AddControllers().AddApiExplorer() kullanın.");
+            return new ApiExplorerDiscoveryService(
+                provider,
+                sp.GetServices<Microsoft.AspNetCore.Routing.EndpointDataSource>());
+        });
         services.TryAddSingleton<IEndpointDiscoveryService>(sp => sp.GetRequiredService<ApiExplorerDiscoveryService>());
         services.TryAddSingleton<IEndpointMethodResolver>(sp => sp.GetRequiredService<ApiExplorerDiscoveryService>());
         services.TryAddSingleton<IScenarioEngine, ScenarioEngine>();
