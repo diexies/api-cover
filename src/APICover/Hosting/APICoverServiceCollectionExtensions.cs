@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
@@ -142,8 +143,8 @@ public static class APICoverApplicationBuilderExtensions
         var uiProviders = app.ApplicationServices.GetServices<IAPICoverUiProvider>().ToList();
         var endpointExtensions = app.ApplicationServices.GetServices<IAPICoverEndpointExtension>().ToList();
 
-        app.UseRouting();
-        app.UseEndpoints(endpoints =>
+        // Route kayıtları için ortak yerel fonksiyon.
+        void MapApiCover(IEndpointRouteBuilder endpoints)
         {
             APICoverEndpoints.MapAll(endpoints, prefix);
             foreach (var extension in endpointExtensions)
@@ -154,7 +155,24 @@ public static class APICoverApplicationBuilderExtensions
             {
                 provider.MapUi(endpoints, prefix);
             }
-        });
+        }
+
+        // KRİTİK: app DOĞRUDAN IEndpointRouteBuilder ise (WebApplication / minimal-API konak),
+        // KENDİ UseRouting()+UseEndpoints() bloğumuzu AÇMAYIZ. WebApplication zaten otomatik bir
+        // terminal UseRouting+UseEndpoints ekler; burada ikinci bir UseEndpoints bloğu açmak
+        // route'ları AYRI bir endpoint-data-source'a koyar → konağın terminal routing'i bunları
+        // GÖRMEZ → tüm /apicover/* yolları 404 döner (konağın kendi app.MapGet'leri çalışırken).
+        // Doğrusu: route'ları doğrudan app'in endpoint-builder'ına ekle (konağın asıl source'u).
+        if (app is IEndpointRouteBuilder routeBuilder)
+        {
+            MapApiCover(routeBuilder);
+        }
+        else
+        {
+            // Klasik IApplicationBuilder konak (ör. Startup.cs Configure) — kendi routing bloğumuz.
+            app.UseRouting();
+            app.UseEndpoints(MapApiCover);
+        }
 
         return app;
     }

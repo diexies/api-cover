@@ -9,7 +9,7 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <Authors>Diexies</Authors>
     <Product>APICover</Product>
-    <Version>0.1.1-alpha</Version>
+    <Version>0.1.2-alpha</Version>
   </PropertyGroup>
 
   <PropertyGroup Label="NuGet">
